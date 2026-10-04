@@ -175,7 +175,10 @@ textarea{width:100%;box-sizing:border-box;min-height:74px;background:var(--void)
 .rcard img{width:52px;height:52px;border-radius:6px;image-rendering:pixelated;flex:none}
 .rcard > div{display:grid;gap:3px;min-width:0}
 .rcard b{font-family:var(--display);letter-spacing:.06em}.rcard .sub{font-size:11px;color:var(--dim)}.rcard .bio{font-size:11.5px;color:var(--ink)}
-.rcard .skills{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:10px;color:var(--dim);font-variant-numeric:tabular-nums}.rcard .skills span{white-space:nowrap}
+.rcard .skills{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:10px;color:var(--dim);font-variant-numeric:tabular-nums}.rcard .skills span{white-space:nowrap;display:inline-flex;align-items:center;gap:3px}
+/* skill level pips: two separate squares (the ●○ glyphs ran together like an infinity sign in some fonts) */
+.skDot{display:inline-block;width:7px;height:7px;border-radius:2px;box-shadow:inset 0 0 0 1px rgba(160,200,220,.55)}.skDot.on{background:var(--power,#7cf29a);box-shadow:0 0 4px rgba(124,242,154,.5)}
+.skDot:first-of-type{margin-left:2px}
 .wlist{display:grid;gap:6px}.wrow{display:flex;gap:8px;align-items:center;justify-content:space-between;border:1px solid var(--line);border-radius:8px;padding:7px 9px;background:var(--hull)}
 .wrow > div{display:grid;gap:2px;min-width:0}.wrow b{font-family:var(--display);letter-spacing:.05em;font-size:13px}.wrow span{font-size:10.5px;color:var(--dim)}
 .wrow.t-laser{border-left:3px solid #5fd4e8}.wrow.t-missile{border-left:3px solid #ffc857}.wrow.t-beam{border-left:3px solid #ff6ec8}.wrow.t-ion{border-left:3px solid #9d8cff}
@@ -246,7 +249,7 @@ body.land .crewCard{flex-direction:column;gap:1px;padding:2px;min-height:0;width
 body.land .crewCard img{width:36px;height:36px;border-radius:50%}
 body.land .crewCard .cc{width:100%}body.land .crewCard .cc b{font-size:8.5px;text-align:center}body.land .crewCard small{display:none}
 body.land .hint{top:auto;bottom:4px;left:150px;right:160px;text-align:center;font-size:10px}
-body.land .coach{position:absolute;top:52px;left:22%;right:22%;margin:0}
+body.land .coach{position:absolute;top:52px;left:22%;right:22%;margin:0;box-sizing:border-box} /* left, width, top/bottom are set by coachPlace() (p4.js) so a tip never covers its subject */
 body.land #deckMap{position:absolute;top:36px;right:0;bottom:0;width:300px;max-height:none;overflow-y:auto;background:rgba(8,11,18,.92);border-left:1px solid var(--line);border-top:0}
 body.land .panel{max-width:760px;max-height:94%}
 body.land .sheet{align-items:center}
@@ -320,8 +323,18 @@ body.land .sheet{align-items:center;padding:8px 16px}
 .shop .price::after{content:" ⚙";font-size:11px}
 
 /* upgrades: system icon, segmented bars */
-.upg{grid-template-columns:minmax(120px,170px) minmax(0,1fr) auto;gap:4px 12px;padding:6px 10px;background:rgba(9,20,34,.75);border:1px solid var(--edgeDim);border-radius:8px}
-.upg .btn{min-height:34px;padding:4px 12px;color:var(--gold)}
+/* the upgrades list: each system is one compact row (name, bars, +1 button side by side), as many rows across as fit,
+   so the whole list and the weapons' SELL buttons fit a phone held either way (blind QA 2, 2026-10-04) */
+.upg{grid-template-columns:repeat(auto-fill,minmax(236px,1fr));gap:3px 16px;padding:5px 10px;background:rgba(9,20,34,.75);border:1px solid var(--edgeDim);border-radius:8px}
+.uRow{display:flex;align-items:center;gap:8px;min-width:0;min-height:28px}
+.uRow .nm{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.uRow .uBars{flex:none;max-width:50px;display:flex}.uRow .uBars .pw{flex-wrap:wrap;row-gap:2px}
+.uRow .btn,.uRow .thinking{flex:none;min-width:70px;text-align:center}
+.upg .btn{min-height:28px;padding:2px 10px;color:var(--gold)}
+.wlist{grid-template-columns:repeat(auto-fill,minmax(240px,1fr))}
+.wlist .wrow{padding:3px 9px}.wlist .wrow > div{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3}.wlist .wrow > div b{display:block}
+.wlist .wrow > div span{display:inline}.wlist .wrow > div span + span::before{content:" · "}.wlist .wrow .btn{min-height:28px;padding:2px 10px;flex:none}
+.panel:has(.upg) > .pBody{gap:4px}.panel:has(.upg) h3{margin-top:2px}body.land .panel:has(.upg){padding-top:12px;padding-bottom:12px;max-height:calc(100% - 24px)}
 .upg .nm{display:flex;align-items:center;gap:7px;color:#dff4ff}
 .upg .nm img{width:24px;height:24px;object-fit:contain}
 .pw{gap:2px}
@@ -367,7 +380,7 @@ body.land .wep{width:60px;height:60px;border:0;background:var(--art,none) center
 body.land .wep::before{inset:-2px;z-index:1;-webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 4px),#000 calc(100% - 3px));mask:radial-gradient(farthest-side,transparent calc(100% - 4px),#000 calc(100% - 3px))}
 body.land .wep .nm{position:absolute;left:50%;bottom:-3px;transform:translateX(-50%);z-index:2;font:700 8px/1 var(--display);letter-spacing:.06em;white-space:nowrap;padding:2px 5px;border-radius:7px;background:rgba(6,12,22,.92);border:1px solid var(--edgeDim);color:#dff4ff;display:block}
 body.land .wep .nm .pw,body.land .wep .sub{display:none}
-body.land .wep .tgt{position:absolute;top:-4px;right:-2px;z-index:2;font:700 7.5px/1 var(--display);letter-spacing:.05em;padding:2px 4px;border-radius:6px;background:#3a0f0c;border:1px solid #ff5a46;color:#ffb3a6}
+body.land .wep .tgt{position:absolute;top:0;right:-4px;z-index:2;font:700 11px/1 var(--display);letter-spacing:.04em;white-space:nowrap;padding:2px 5px;border-radius:6px;background:#3a0f0c;border:1px solid #ff5a46;color:#ffb3a6}
 body.land .wep .tgt:empty{display:none}
 body.land .wep.off{opacity:1;filter:grayscale(.85) brightness(.6)}
 body.land .wep.ready{box-shadow:0 0 12px rgba(124,242,154,.55)}
@@ -389,7 +402,7 @@ body.land .actRow{top:4px;right:6px}
 body.land .actRow .act{min-height:30px;border:0;border-image:url(art/ui_frame_button.png) 40 fill / 7px stretch;color:#bfeeff;background:none}
 body.land .actRow .act.armed{color:var(--gold)}
 body.land .actRow .act .bar{background:var(--edge)}
-body.land .hint{top:20px;bottom:auto;left:154px;right:300px;text-align:left;font-size:10px;color:#a9d8ea}
+body.land .hint{top:20px;bottom:auto;left:154px;right:300px;text-align:left;font-size:10px;color:#a9d8ea;-webkit-line-clamp:4} /* right: fitHint() (p3.js) */
 body.land .coach{background:rgba(8,16,28,.96);border:1px solid var(--edge);box-shadow:var(--glow);padding:8px 10px;gap:6px}
 body.land .coach p{font-size:12.5px}
 body.land .coachBtns button{min-height:38px}
@@ -426,8 +439,14 @@ body.land .hgCrew span{width:52px}body.land .hgCrew img{width:38px;height:38px}
 .opSoon{font:600 9px var(--display);letter-spacing:.14em;color:var(--gold)}
 .opBrand{position:absolute;right:max(16px,env(safe-area-inset-right));top:10px;z-index:2;font:700 14px var(--display);letter-spacing:.3em;color:#e8f8ff;text-shadow:0 0 10px rgba(63,200,236,.6)}
 .opBrand i{font-style:normal;color:var(--edge)}
+.opKeys{position:absolute;right:max(16px,env(safe-area-inset-right));top:36px;z-index:2;min-height:28px;padding:3px 12px;border-radius:8px;border:1px solid var(--edgeDim);background:rgba(8,16,28,.7);color:#bfeeff;font:600 10.5px var(--display);letter-spacing:.18em}
+.opKeys[hidden]{display:none}
 .opArrow{position:absolute;top:50%;z-index:2;width:44px;height:64px;margin-top:-40px;border-radius:10px;border:1px solid var(--edgeDim);background:rgba(8,16,28,.6);color:var(--edge);font-size:20px}
-.opArrow.l{left:6px}.opArrow.r{right:6px}
+/* the arrows sit mid-height, exactly where a landscape iPhone's camera island and curved edge are: keep them inside the
+   safe area (the stage's left and right are the phone's top and bottom when it's held upright and turned) */
+#opening{--opSafeL:env(safe-area-inset-left,0px);--opSafeR:env(safe-area-inset-right,0px)}
+body.rot #opening{--opSafeL:env(safe-area-inset-top,0px);--opSafeR:env(safe-area-inset-bottom,0px)}
+.opArrow.l{left:max(8px,var(--opSafeL))}.opArrow.r{right:max(8px,var(--opSafeR))}
 .opArrow:disabled{opacity:.25}
 .opDots{position:absolute;left:50%;bottom:62px;z-index:2;transform:translateX(-50%);display:flex;gap:8px}
 .opDots i{width:8px;height:8px;border-radius:50%;background:rgba(160,200,220,.35)}.opDots i.on{background:var(--edge);box-shadow:0 0 6px var(--edge)}
@@ -438,8 +457,15 @@ body.land .hgCrew span{width:52px}body.land .hgCrew img{width:38px;height:38px}
 
 /* ===== QA pass 2026-10-04: feedback on blocked taps, readable store cards, close buttons that stay in view ===== */
 .shop .choice.no{opacity:.5}
-.shop .choice.open{grid-column:1/-1;opacity:1;box-shadow:0 0 0 1px var(--gold) inset}
-.shop .choice.open > div span{display:block;-webkit-line-clamp:unset;overflow:visible}
+.shop .choice.open{opacity:1;box-shadow:0 0 0 2px var(--gold) inset,0 0 12px rgba(255,194,74,.35)}
+/* the open item's full text and what it costs you, in the footer beside the buttons: a fixed-size strip, so no card moves */
+.shopFoot{flex-wrap:nowrap;align-items:center}.shopFoot > .btn{flex:none}
+.shopInfo{flex:1 1 auto;min-width:0;height:44px;overflow:hidden;display:flex;flex-direction:column;justify-content:center;gap:1px;padding-left:6px;font:500 10.5px/1.3 var(--mono);color:var(--dim)}
+.shopInfo b{font:600 11px/1.25 var(--display);letter-spacing:.06em;color:#e8f8ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.shopInfo span{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.shopInfo b + span{-webkit-line-clamp:1}
+.shopInfo .buyCue{margin-top:0}
+@media (hover:hover) and (pointer:fine){ .shop .choice:not(:disabled):hover{box-shadow:0 0 0 1px var(--edge) inset,0 0 10px rgba(63,200,236,.3)} .shop .choice.open:hover{box-shadow:0 0 0 2px var(--gold) inset,0 0 12px rgba(255,194,74,.35)} }
 .shop .choice .buyCue{display:block;font:600 10px/1.3 var(--display);font-style:normal;letter-spacing:.1em;color:var(--gold);margin-top:2px}
 .shop .choice .buyCue.bad{color:#ff8a8a}
 .btn.no{opacity:.5}
@@ -2149,8 +2175,12 @@ function drawRooms(ship, dt){
     if (ship.vent && ship.vent[r.id]){
       X.strokeStyle = `rgba(157,140,255,${0.55 + 0.35*Math.sin(t*6)})`; X.lineWidth = 2; X.setLineDash([4,3]);
       X.strokeRect(q.x + 2, q.y + 2, q.w - 4, q.h - 4); X.setLineDash([]);
-      X.font = `700 ${Math.max(7, Math.min(10, g.cell*0.17))}px "Chakra Petch", system-ui, sans-serif`; X.fillStyle = "#c9b8ff";
-      X.textBaseline = "bottom"; X.textAlign = "right"; X.fillText("VENTING", q.x + q.w - 4, q.y + q.h - 3);
+      // the label sits inside the room on a dark pill, clear of the walls, doors and the dashed outline (blind QA 3)
+      let fs = Math.max(7, Math.min(10, g.cell*0.17)); X.font = `700 ${fs}px "Chakra Petch", system-ui, sans-serif`;
+      let tw = X.measureText("VENTING").width; if (tw > q.w - 14){ fs = Math.max(6, fs*(q.w - 14)/tw); X.font = `700 ${fs}px "Chakra Petch", system-ui, sans-serif`; tw = X.measureText("VENTING").width; }
+      const lx = q.x + q.w/2, ly = q.y + q.h - 8 - fs*0.6;
+      X.fillStyle = "rgba(10,8,24,.78)"; X.beginPath(); X.roundRect(lx - tw/2 - 3, ly - fs*0.62, tw + 6, fs*1.24, 3); X.fill();
+      X.fillStyle = "#c9b8ff"; X.textBaseline = "middle"; X.textAlign = "center"; X.fillText("VENTING", lx, ly); X.textAlign = "left"; X.textBaseline = "alphabetic";
     }
     if (h && h.fire > 0){
       X.fillStyle = `rgba(255,120,40,${0.12 + 0.12*Math.sin(t*9 + q.x) + h.fire/600})`; X.fillRect(q.x, q.y, q.w, q.h);
@@ -2604,6 +2634,10 @@ function roomAt(ship, x, y){
     for (const r of ship.layout){ const P = sh.polys[r.id]; if (!P) continue; if (navInPoly(P, ax, ay)) return r.id; const d = navEdgeDist(P, ax, ay); if (d < bd){ bd = d; best = r.id; } }
     if (best && bd*ca.s <= 10) return best; } // a tap on a wall or a door between rooms: the nearest room, within a finger's slop
   for (const r of ship.layout){ const q = rrect(ship, r); if (q.hidden) continue; if (x >= q.x && x <= q.x+q.w && y >= q.y && y <= q.y+q.h) return r.id; } return null; }
+// the room nearest a tap that landed on the ship but between rooms (a wall, the hull, a doorway), within one cell
+function roomNear(ship, x, y){ const pad = G(ship).cell; let best = null, bd = pad;
+  for (const r of ship.layout){ const q = rrect(ship, r); if (q.hidden) continue; const d = Math.hypot(clamp(x, q.x, q.x + q.w) - x, clamp(y, q.y, q.y + q.h) - y); if (d <= bd){ bd = d; best = r.id; } }
+  return best; }
 let mapDrag = null;
 cv.addEventListener("pointermove", e => {
   if (!mapDrag || !S || S.mode !== "map") return;
@@ -2625,7 +2659,7 @@ cv.addEventListener("pointerdown", e => {
   const ins = S.inset; if (ins && !S.foe.env && x >= ins.x && x <= ins.x + ins.w && y >= ins.y && y <= ins.y + ins.h){
     // the small ship's window: with a weapon (or the teleporter) armed, a room in it is a target; with a crew member
     // picked, a room on their own ship is where they go; otherwise the tap swaps the big and small views
-    const sr = roomAt(S[ins.key], x, y), sc = S.selC !== null ? S.you.crew[S.selC] : null;
+    const sr = roomAt(S[ins.key], x, y) || (S.boardArm && ins.key === "foe" ? roomNear(S.foe, x, y) : null), sc = S.selC !== null ? S.you.crew[S.selC] : null;
     const aim = sr && ins.key === "foe" && (S.selW !== null || S.boardArm), send = sr && sc && sc.hp > 0 && sc.on === ins.key;
     if (!aim && !send){ swapFocus(ins.key); AUDIO.sfx("click"); return; }
   }
@@ -2633,7 +2667,8 @@ cv.addEventListener("pointerdown", e => {
   const ci = S.you.crew.findIndex(c => c.hp > 0 && c.gx != null && !crewPx(c).hidden && (() => { const p = crewPx(c), hs = Math.max(16, G(S[c.on]).cell*0.5); return Math.hypot(p.x - x, p.y - hs*0.2 - y) < Math.max(12, hs*0.55); })());
   if (ci >= 0 && !S.boardArm){ S.selC = S.selC === ci ? null : ci; S.selW = null; buildDeck(); AUDIO.sfx("click"); if (S.selC !== null) setHint(`Tap a room to send ${S.you.crew[ci].name}.`); return; }
   const fr = S.foe.env ? null : roomAt(S.foe, x, y), yr = roomAt(S.you, x, y);
-  if (fr && S.boardArm){ doBoard(fr); return; }
+  // boarding: the tap that picks the room sends them, and the hint and button say so on that same tap (blind QA 2)
+  if (S.boardArm && !S.foe.env){ const br = fr || roomNear(S.foe, x, y); if (br){ doBoard(br); return; } }
   if (fr && S.selW !== null){
     const w = S.you.weapons[S.selW];
     if (w){ w.target = fr; setHint(`${w.name} → ${SYS_LABEL[fr] || fr.toUpperCase()}`); AUDIO.sfx("click"); }
@@ -2720,8 +2755,14 @@ function buildDeck(){
   $("aVent").addEventListener("click", actVent);
   tickDeck();
 }
+// the hint ends where the action buttons begin, however many there are (blind QA 3: with BOARD and VENT showing,
+// the old fixed edge ran the vent hint under BOARD)
+function fitHint(){ const h = $("hint"), ar = document.querySelector(".actRow"); if (!h || !ar) return;
+  if (!document.body.classList.contains("land") || !S || S.mode !== "fight" || !ar.offsetWidth){ if (h.style.right) h.style.right = ""; return; }
+  const box = stageRect(h.offsetParent || cv), a = stageRect(ar), r = Math.round(Math.max(8, box.left + box.width - a.left + 8)) + "px"; if (h.style.right !== r) h.style.right = r; }
 function tickDeck(){
   if (!S || S.mode !== "fight") return;
+  { const ar = document.querySelector(".actRow"), k = (ar ? ar.offsetWidth : 0) + "," + W; if (k !== fitHint.k){ fitHint.k = k; fitHint(); } }
   const you = S.you;
   you.weapons.forEach((w,i) => {
     const el = $("w"+i); if (!el) return;
@@ -2768,14 +2809,14 @@ function hudRes(){ const h = $("hudRes"); if (!h || !R) return; const y = R.you;
 function actVent(){
   if (!S || S.mode !== "fight" || S.over) return;
   S.ventArm = !S.ventArm; S.selW = null; S.selC = null; S.boardArm = false; AUDIO.sfx("click");
-  setHint(S.ventArm ? "Tap your rooms to open their airlocks. Vacuum puts out fire and chokes boarders, and your own crew too." : (Object.values(S.you.vent || {}).some(Boolean) ? "Airlocks stay open. Tap VENT again to close them." : ""));
+  setHint(S.ventArm ? "Tap your rooms to open their airlocks. Vacuum kills fire and boarders, and your crew too." : (Object.values(S.you.vent || {}).some(Boolean) ? "Airlocks stay open. Tap VENT again to close them." : ""));
   buildDeck();
 }
 function toggleVent(rid){
   if (S.you.sys.doors && cap(S.you, "doors") <= 0){ setHint("The doors are wrecked: no airlock opens or shuts until someone repairs the DOORS room."); AUDIO.sfx("click"); return; }
   const v = S.you.vent || (S.you.vent = {});
   v[rid] = !v[rid]; AUDIO.sfx("click");
-  float(S.you, rid, v[rid] ? "VENTING" : "SEALED", v[rid] ? "#c9b8ff" : "#7cf29a");
+  if (!v[rid]) float(S.you, rid, "SEALED", "#7cf29a"); // an open room already wears its VENTING label; a second, drifting one crossed the walls
   // never vent your own people: anyone of ours in (or headed to) that room steps out to the best air next door
   let moved = 0;
   if (v[rid]){
@@ -2822,7 +2863,7 @@ function actBoard(){
 function doBoard(rid){
   const you = S.you, party = crewAt(you, "tele", "you");
   S.boardArm = false;
-  if (!party.length || you.teleCharge < 1) return;
+  if (!party.length || you.teleCharge < 1){ setHint(!party.length ? "Send crew to the TELEPORT room first." : "The teleporter is still charging."); tickDeck(); return; }
   for (const c of party){ c.on = "foe"; c.dest = c.room = rid; c.gx = null; }
   you.teleCharge = 0; AUDIO.sfx("teleport"); float(S.foe, rid, "BOARDED", "#5fd4e8");
   setHint(`${party.map(c => c.name).join(" and ")} aboard the ${S.foe.name}. Recall them before it blows.`); buildDeck();
@@ -4108,7 +4149,7 @@ function drawBubbles(dt){
   if (!S.bubbles || !S.bubbles.length) return;
   X.font = `500 11px "IBM Plex Mono", monospace`; X.textBaseline = "top";
   for (const b of S.bubbles){
-    b.life -= dt;
+    b.life -= dt*1.3; // a line reads in about two and a half seconds; the bubble used to hang on over the crew
     const c = b.c; if (c.hp <= 0 || c.gx == null) { b.life = 0; continue; }
     const sh_ = S[c.on], g = G(sh_), hs = Math.max(18, Math.min(56, g.cell*(sh_.cut ? 0.95 : 0.6))), p = crewPx(c);
     if (p.hidden) continue;
@@ -4116,9 +4157,16 @@ function drawBubbles(dt){
     for (const w of words){ const tt = line ? line + " " + w : w; if (X.measureText(tt).width > 150 && line){ lines.push(line); line = w; } else line = tt; }
     if (line) lines.push(line);
     const tw = Math.max(...lines.map(l => X.measureText(l).width)) + 12, th = lines.length*13 + 8;
-    let bx = clamp(p.x - tw/2, 6, W - tw - 6), by = p.y - hs*0.7 - th - 8;
-    if (by < 4) by = p.y + hs*0.6;
-    X.globalAlpha = Math.min(1, b.life*3);
+    // the bubble sits above the speaker's head and steers clear of everyone else on that ship (blind QA 3: bubbles
+    // hid the crew); if no spot is clear it goes see-through and fades out sooner
+    const others = allCrew().filter(o => o !== c && o.hp > 0 && o.on === c.on && o.gx != null).map(crewPx).filter(q => !q.hidden);
+    const covers = (x, y) => others.some(q => q.x > x - hs*0.3 && q.x < x + tw + hs*0.3 && q.y - hs*0.9 < y + th && q.y + hs*0.1 > y);
+    const top = p.y - hs*0.7 - th - 8, spots = [[p.x - tw/2, top], [p.x + 6, top], [p.x - tw - 6, top], [p.x - tw/2, top - hs*0.6]]
+      .map(([x, y]) => [clamp(x, 6, W - tw - 6), y]).filter(([, y]) => y >= 4);
+    const spot = spots.find(([x, y]) => !covers(x, y)), crowded = !spot;
+    let [bx, by] = spot || spots[0] || [clamp(p.x - tw/2, 6, W - tw - 6), p.y + hs*0.6];
+    if (crowded) b.life -= dt*1.5; // a crowded bubble says its line and gets out of the way
+    X.globalAlpha = Math.min(crowded ? 0.6 : 1, b.life*3);
     X.fillStyle = "rgba(10,15,24,.92)"; X.strokeStyle = c.color; X.lineWidth = 1;
     X.beginPath(); X.roundRect ? X.roundRect(bx, by, tw, th, 6) : X.rect(bx, by, tw, th); X.fill(); X.stroke();
     X.fillStyle = "#d9e2f2"; lines.forEach((l, i) => X.fillText(l, bx + 6, by + 5 + i*13));
@@ -4737,8 +4785,10 @@ function sheet(html, keepScroll){ const p = $("panel"), sc0 = p.querySelector(":
     while (p.firstChild !== last) body.appendChild(p.firstChild); p.insertBefore(body, last); p.classList.add("hasFoot"); }
   $("sheet").hidden = false; p.scrollTop = 0; const sc = p.querySelector(":scope > .pBody") || p; sc.scrollTop = keepScroll ? y : 0;
   if (typeof hudRes === "function") hudRes(); } // the top bar's scrap/hull follow every buy and sale
-// a tap on the dim area around a sheet closes it, when the sheet has a way out (never an event's choices, never LEAVE STORE)
-$("sheet").addEventListener("click", e => { if (e.target !== $("sheet")) return; const b = $("panel").querySelector("#back, #done, #logDone, #close"); if (b && !b.disabled) b.click(); });
+// a tap on the dim area around a sheet closes it, when the sheet has a way out (never an event's choices, never LEAVE STORE:
+// leaving loses the store and there is no way back to it from the map, so there the tap only says how to go)
+$("sheet").addEventListener("click", e => { if (e.target !== $("sheet")) return; const b = $("panel").querySelector("#back, #done, #logDone, #close"); if (b && !b.disabled) return b.click();
+  if ($("leave")) nope("Tap LEAVE STORE to go."); });
 // a short line over the sheet for a tap that can't go through (no scrap, hull already whole)
 function nope(msg){ AUDIO.sfx("click"); let t = $("nope"); if (!t){ t = document.createElement("div"); t.id = "nope"; t.className = "nope"; t.setAttribute("role", "status"); $("sheet").appendChild(t); }
   t.textContent = msg; t.classList.remove("on"); void t.offsetWidth; t.classList.add("on"); clearTimeout(nope.t); nope.t = setTimeout(() => t.classList.remove("on"), 1800); }
@@ -5300,9 +5350,12 @@ function openStore(n){
     const goodsArt = it => it.kind === "weapon" ? wepArt(it.weapon) : it.kind === "missiles" ? wepArt("leto") : it.kind === "system" ? sysIcon(it.system) : it.kind === "drone" ? sysIcon("drones") : it.kind === "fuel" ? sysIcon("engines") : "";
     sheet(`<div class="storeHead"><h2>MERCHANT STATION</h2><p>Scrap <b style="color:var(--gold)">${R.scrap}</b> · Hull ${you.hull}/${you.maxHull} · Fuel ${R.fuel} · Missiles ${you.missiles}</p></div>
       <div class="shop">${n.stock.map((it,i) => { const no = why(it), sel = open === i, im = goodsArt(it);
-        const cue = sel ? (no || "TAP AGAIN TO BUY") : (blockOf(it) && !it.detail ? blockOf(it) : "");
-        return `<button class="choice${no ? " no" : ""}${sel ? " open" : ""}" data-b="${i}" aria-expanded="${sel}">${im ? `<img src="${im}" alt="">` : "<span></span>"}<div><b>${esc(it.label)}</b>${it.detail ? `<span>${esc(it.detail)}</span>` : ""}${cue ? `<em class="buyCue${no ? " bad" : ""}">${esc(cue)}</em>` : ""}</div><span class="price">${it.price}</span></button>`; }).join("")}</div>
-      <div class="btnRow"><button class="btn" id="upg">SHIP &amp; UPGRADES</button><button class="btn primary" id="leave">LEAVE STORE</button></div>`, true);
+        // a card looks the same open or shut (only its outline lights), so no card ever moves between the two taps
+        // (blind QA 3: the open card used to span the row and the next tap landed on a different item)
+        const cue = blockOf(it) && !it.detail ? blockOf(it) : "";
+        return `<button class="choice${no ? " no" : ""}${sel ? " open" : ""}" data-b="${i}" aria-expanded="${sel}" data-name="${esc(it.label)}" data-detail="${esc(it.detail || "")}" data-note="${esc(no ? no : `${it.price} scrap · ${sel ? "click again to buy" : "click to pick, click again to buy"}`)}">${im ? `<img src="${im}" alt="">` : "<span></span>"}<div><b>${esc(it.label)}</b>${it.detail ? `<span>${esc(it.detail)}</span>` : ""}${cue ? `<em class="buyCue bad">${esc(cue)}</em>` : ""}</div><span class="price">${it.price}</span></button>`; }).join("")}</div>
+      <div class="btnRow shopFoot"><button class="btn" id="upg">SHIP &amp; UPGRADES</button><button class="btn primary" id="leave">LEAVE STORE</button>${(() => { const it = open !== null ? n.stock[open] : null, no = it ? why(it) : "";
+        return `<div class="shopInfo" aria-live="polite">${it ? `<b>${esc(it.label)} · ${it.price} scrap</b>${it.detail ? `<span>${esc(it.detail)}</span>` : ""}<em class="buyCue${no ? " bad" : ""}">${esc(no || "TAP AGAIN TO BUY")}</em>` : `<span>Tap an item to see it. Tap it again to buy.</span>`}</div>`; })()}</div>`, true);
     $("panel").querySelectorAll("[data-b]").forEach(b => b.addEventListener("click", () => {
       const i = +b.dataset.b, it = n.stock[i]; if (!it) return;
       if (open !== i){ open = i; draw(); const no = why(it); if (no) nope(no); else AUDIO.sfx("click"); return; }
@@ -5328,12 +5381,11 @@ function openShip(back){
   let sellArm = null; // a sale needs a second tap: SELL? TAP AGAIN
   const draw = () => {
     const rows = Object.entries(you.sys).map(([id,s]) => { const max = (MOD.systemsInfo[id] || {}).max || 8, cost = upgradeCost(id, s.level);
-      return `<span class="nm"><img src="${sysIcon(id)}" alt="">${SYS_LABEL[id]}</span><span>${pips(s.level, s.level, 0)}</span>${s.level >= max ? `<span class="thinking">MAX</span>` : `<button class="btn${R.scrap < cost ? " no" : ""}" data-u="${id}">+1 · ${cost}</button>`}`; }).join("");
+      return `<div class="uRow"><span class="nm"><img src="${sysIcon(id)}" alt="">${SYS_LABEL[id]}</span><span class="uBars">${pips(s.level, s.level, 0)}</span>${s.level >= max ? `<span class="thinking">MAX</span>` : `<button class="btn${R.scrap < cost ? " no" : ""}" data-u="${id}">+1 · ${cost}</button>`}</div>`; }).join("");
     const rc = upgradeCost("reactor", you.reactor);
-    sheet(`<h2>${esc(you.name)}</h2>
-      <p>Scrap <b style="color:var(--warn)">${R.scrap}</b> · Hull ${you.hull}/${you.maxHull} · Fuel ${R.fuel} · Missiles ${you.missiles}</p>
-      <h3>SYSTEMS</h3>
-      <div class="upg">${rows}<span class="nm"><img src="${sysIcon("reactor")}" alt="">REACTOR</span><span>${pips(Math.min(you.reactor, 25), Math.min(you.reactor,25), 0)}</span><button class="btn${R.scrap < rc || you.reactor >= 25 ? " no" : ""}" data-u="reactor">+1 · ${rc}</button></div>
+    sheet(`<div class="storeHead"><h2>${esc(you.name)}</h2>
+      <p>Scrap <b style="color:var(--warn)">${R.scrap}</b> · Hull ${you.hull}/${you.maxHull} · Fuel ${R.fuel} · Missiles ${you.missiles}</p></div>
+      <div class="upg" aria-label="Systems">${rows}<div class="uRow"><span class="nm"><img src="${sysIcon("reactor")}" alt="">REACTOR</span><span class="uBars">${pips(Math.min(you.reactor, 25), Math.min(you.reactor,25), 0)}</span><button class="btn${R.scrap < rc || you.reactor >= 25 ? " no" : ""}" data-u="reactor">+1 · ${rc}</button></div></div>
       <h3>WEAPONS</h3>
       <div class="wlist">${you.weapons.map((w,i) => { const wi = weaponInfo(w); return `<div class="wrow t-${w.type}"><div><b>${esc(w.name)}</b><span>${esc(wi.head)}</span><span>${esc(wi.tags)}</span></div><button class="btn${sellArm === i ? " armed" : ""}" data-sell="${i}">${sellArm === i ? "SELL? TAP AGAIN" : `SELL ${Math.round((w.price||40)/2)}`}</button></div>`; }).join("") || "<p>None mounted.</p>"}${you.drones.length ? `<p>Drones: ${you.drones.map(d => d.type).join(", ")}</p>` : ""}</div>
       <h3>CREW</h3>
@@ -5358,7 +5410,7 @@ function crewCardHtml(c){
   const bonds = Object.entries(c.bonds || {}).filter(([n, v]) => v >= MOD.rules.bondTime && R.you.crew.some(o => o.name === n)).map(([n]) => n);
   return `<div class="rcard"><img src="${portrait(c)}" alt=""><div><b style="color:${c.color}">${esc(c.name)}</b><span class="sub">${esc(sp.name)} ${esc(crewTitle(c))} · ${Math.ceil(c.hp)}/${c.maxHp} hp · ${c.kills} kills</span>
     ${c.bio ? `<span class="bio">${esc(c.bio.past)}${c.bio.trait ? ` · <i>${esc(c.bio.trait)}</i>` : ""}</span>` : ""}
-    <span class="skills">${SKILLS.map(k => `<span>${SKILL_LABEL[k]} ${"●".repeat(lvl(c,k))}${"○".repeat(2 - lvl(c,k))}</span>`).join("")}</span>
+    <span class="skills">${SKILLS.map(k => `<span aria-label="${SKILL_LABEL[k]} ${lvl(c,k)} of 2">${SKILL_LABEL[k]} ${[0, 1].map(j => `<i class="skDot${j < lvl(c,k) ? " on" : ""}"></i>`).join("")}</span>`).join("")}</span>
     ${bonds.length ? `<span class="sub">bonded with ${esc(bonds.join(", "))}</span>` : ""}</div></div>`;
 }
 $("probeBtn").addEventListener("click", () => { AUDIO.unlock(); if (R && S.mode === "map" && !R.jumping) probePlanet(); });
@@ -5448,7 +5500,7 @@ function saveRun(){ if (!R) return; if (R._pickApplied && R.pendingArrive && R.p
    One line at a time, only when it first matters. Each tip shows once; NO TIPS turns them all off. */
 const coach = Object.assign({seen: [], off: false}, lsGet("ftlr.tips") || {}), coachSave = () => lsSet("ftlr.tips", {seen: coach.seen, off: coach.off});
 const TIPS = [
-  {id: "aim", text: "Tap a weapon below, then tap an enemy room to aim it. Tap RESUME when you're ready.",
+  {id: "aim", on: "foe", text: "Tap a weapon below, then tap an enemy room to aim it. Tap RESUME when you're ready.",
     when: () => !S.foe.env && S.you.weapons.length && !S.you.weapons.some(w => w.target), done: () => S.you.weapons.some(w => w.target)},
   {id: "shields", text: "Incoming fire. Your shields stop lasers, but missiles fly straight through them.",
     when: () => S.fx.some(p => p.from === S.foe && p.t > 0)},
@@ -5462,15 +5514,49 @@ function coachTick(){
   const el = $("coach"); if (!el) return;
   const live = S && S.mode === "fight" && !S.over && !coach.off && !(STAGE.ok && STAGE.inCine());
   if (coachTip && (!live || (coachTip.done && coachTip.done()))){ coachClose(false); return; }
-  if (!live || coachTip) return;
+  if (coachTip){ coachPlace(); return; }
+  if (!live) return;
   const tip = TIPS.find(t => !coach.seen.includes(t.id) && t.when());
   if (!tip) return;
   coachTip = tip; coach.seen.push(tip.id); coachSave();
-  $("coachText").textContent = tip.text; el.classList.toggle("coachTop", tip.at === "top"); el.hidden = false; // tips about your ship sit up top so it stays in view $("hint").style.visibility = "hidden";
+  $("coachText").textContent = tip.text; el.classList.toggle("coachTop", tip.at === "top"); el.hidden = false;
+  coachPlace();
   if (!S.paused){ S.paused = true; coachPaused = true; tickDeck(); }
 }
+/* A tip never covers what it explains (blind QA 2, 2026-10-04). Each tip is about one ship (`on`, yours unless it
+   says the enemy's). The box floats over the OTHER ship: when the subject is big, over the swap window; when the
+   subject sits in the window (or in a hazard fight, where there is no window), low in the middle, above the crew
+   portraits, between the systems column and the weapons, clear of the window. Re-placed every frame while shown,
+   so tapping a weapon (which brings the enemy up big) moves the aim tip off it. */
+function coachPlace(){
+  const el = $("coach"); if (!el || el.hidden || !coachTip || !S || S.mode !== "fight" || !document.body.classList.contains("land")) return;
+  const key = [coachTip.id, S.focus, W, H, TS, S.foe.env ? 1 : 0].join(); if (coachPlace.k === key) return; coachPlace.k = key;
+  const host = stageRect(el.offsetParent || el.parentElement), cb = stageRect(cv), on = coachTip.on || "you";
+  const big = S.focus === "foe" ? "foe" : "you", b = S.inset && !S.foe.env ? S.inset : null;
+  const win = b && {left: cb.left + b.x - 4, top: cb.top + (b.y - 16)*TS, width: b.w + 6, height: (b.h + 22)*TS};
+  const crew = $("crew"), cr = crew && crew.offsetParent ? stageRect(crew) : null, wb = $("weps"), wr = wb && wb.offsetParent ? stageRect(wb) : null;
+  const sysR = stageRect($("sysBox") || cv);
+  // the spots: over the swap window, or low in the middle above the crew portraits (clear of the window)
+  const lo = Math.max(cb.left + 152, sysR.left + sysR.width + 6), hi = Math.min(wr && wr.width ? wr.left - 8 : cb.left + cb.width - 150, win ? win.left - 8 : 1e9);
+  const lowW = Math.min(460, Math.max(220, hi - lo)), low = {L: Math.max(lo, (lo + hi)/2 - lowW/2), Wd: lowW, Bt: (cr && cr.height ? cr.top : cb.top + cb.height - 50) - 8};
+  const spots = win ? (on === big ? [{L: win.left, Wd: win.width, T: win.top + 14}, low] : [low, {L: win.left, Wd: win.width, T: win.top + 14}]) : [low];
+  const ship = S[on], rooms = ship.layout.map(r => rrect(ship, r)).filter(q => !q.hidden).map(q => ({left: cb.left + q.x, top: cb.top + q.y*TS, width: q.w, height: q.h*TS}));
+  // a third spot: the window's column, nudged right of the subject's rooms where a wide ship reaches under it
+  if (win){ const reach = rooms.filter(q => q.top < win.top + win.height && q.top + q.height > win.top).reduce((m, q) => Math.max(m, q.left + q.width), -1e9), L2 = Math.max(win.left, reach + 6), W2 = cb.left + cb.width - 6 - L2;
+    if (L2 > win.left && W2 >= 180) spots.push({L: L2, Wd: W2, T: win.top + 14}); }
+  const keep = [wr, cr, sysR].filter(r => r && r.width);
+  const over = (a, c) => Math.max(0, Math.min(a.left + a.width, c.left + c.width) - Math.max(a.left, c.left))*Math.max(0, Math.min(a.top + a.height, c.top + c.height) - Math.max(a.top, c.top));
+  const put = sp => { const st = el.style, want = {left: (sp.L - host.left) + "px", width: sp.Wd + "px", right: "auto",
+    top: sp.Bt == null ? (sp.T - host.top) + "px" : "auto", bottom: sp.Bt == null ? "auto" : (host.top + host.height - sp.Bt) + "px"};
+    for (const k in want) if (st[k] !== want[k]) st[k] = want[k]; };
+  // the first spot that leaves the subject's rooms (and the controls) uncovered wins; else the one that covers least
+  let best = null, bestScore = Infinity;
+  for (const sp of spots){ put(sp); const r = stageRect(el), score = rooms.reduce((a, q) => a + over(r, q), 0) + keep.reduce((a, q) => a + 4*over(r, q), 0);
+    if (score < bestScore){ best = sp; bestScore = score; } if (score === 0) break; }
+  if (best) put(best);
+}
 // GOT IT resumes a fight the tip paused; doing the thing the tip asked for leaves it paused for you
-function coachClose(resume = true){ const el = $("coach"); if (el) el.hidden = true; $("hint").style.visibility = ""; if (resume && coachPaused && S && S.mode === "fight" && !S.over){ S.paused = false; tickDeck(); } coachTip = null; coachPaused = false; }
+function coachClose(resume = true){ coachPlace.k = null; const el = $("coach"); if (el) el.hidden = true; $("hint").style.visibility = ""; if (resume && coachPaused && S && S.mode === "fight" && !S.over){ S.paused = false; tickDeck(); } coachTip = null; coachPaused = false; }
 $("coachOk").addEventListener("click", () => { AUDIO.sfx("click"); coachClose(); });
 $("coachOff").addEventListener("click", () => { AUDIO.sfx("click"); coach.off = true; coachSave(); coachClose(); });
 
@@ -5522,7 +5608,7 @@ function showTitle(){
   el.innerHTML = `<div class="opTrack" id="opTrack">${CREWS.map((c, k) => `<section class="opSlide" aria-label="${esc(c.name)}"><img src="${c.art}" alt="">
       <div class="opInfo"><span class="opKick">${k === 0 ? `CLONE №${(UNI.runs || 0) + 1}` : c.kick}</span><h1 class="opName">${esc(c.name)}</h1><p class="opMotif">${esc(c.motif)}</p>
         <ul class="opRules">${c.rules.map(r => `<li>${esc(r)}</li>`).join("")}</ul>${c.soon ? `<span class="opSoon">CREW RULES COMING · PLAYS THE STANDARD RUN FOR NOW</span>` : ""}</div></section>`).join("")}</div>
-    <div class="opBrand">FTL<i>:</i> REDUX</div>
+    <div class="opBrand">FTL<i>:</i> REDUX</div><button class="opKeys" id="opKeys" hidden aria-label="Keyboard shortcuts">KEYS</button>
     <button class="opArrow l" id="opPrev" aria-label="Previous crew">&#9664;</button><button class="opArrow r" id="opNext" aria-label="Next crew">&#9654;</button>
     <div class="opDots" id="opDots">${CREWS.map(() => "<i></i>").join("")}</div>
     <div class="opBar">
@@ -5546,10 +5632,11 @@ function showTitle(){
   const end = e => { if (!sw) return; const dx = stagePt(e.clientX, e.clientY).x - sw.x; sw = null; track.style.transition = ""; if (Math.abs(dx) > 40){ AUDIO.unlock(); AUDIO.sfx("click"); go(at + (dx < 0 ? 1 : -1)); } else go(at); };
   track.addEventListener("pointerup", end); track.addEventListener("pointercancel", end);
   const start = () => { AUDIO.unlock(); AUDIO.sfx("click"); lsSet("ftlr.crew", CREWS[at].id); };
-  $("opPlay").addEventListener("click", () => { start(); newRun(mythPick(), chooseShip.last || MOD.player.id); });
+  $("opPlay").addEventListener("click", () => { start(); newRun(mythPick(), shipPick()); });
   $("opShip").addEventListener("click", () => { start(); chooseShip(mythPick()); });
   $("opMyth").addEventListener("click", () => { start(); chooseMyth(); });
   $("opLog").addEventListener("click", () => { AUDIO.unlock(); AUDIO.sfx("click"); showLog(); });
+  $("opKeys").addEventListener("click", () => { AUDIO.unlock(); AUDIO.sfx("click"); showKeys(); }); syncKeysBtns();
   $("opSnd").addEventListener("click", () => { $("sndBtn").click(); $("opSnd").textContent = $("sndBtn").textContent; });
   if (saved) $("opCont").addEventListener("click", () => { AUDIO.unlock(); AUDIO.sfx("click"); R = saved; R.jumping = false;
     const p = R.pendingArrive, n = p && R.map.nodes[p.id];
@@ -5619,16 +5706,20 @@ function chooseShip(epicId){
     const drawn = drawHullArt(cv, d);
     if (!drawn) { try { drawShipPreview(cv, d); } catch (e) {} }
     chooseShip.redraw = () => { if ($("hgShip") === cv) drawHullArt(cv, d); };
-    const flip = k => { at = (at + k + defs.length) % defs.length; chooseShip.last = defs[at].id; AUDIO.sfx("click"); render(); };
+    const flip = k => { at = (at + k + defs.length) % defs.length; pickShip(defs[at].id); AUDIO.sfx("click"); render(); };
     $("hgPrev").addEventListener("click", () => flip(-1));
     $("hgNext").addEventListener("click", () => flip(+1));
     let sx = null; cv.addEventListener("pointerdown", e => { sx = stagePt(e.clientX, e.clientY).x; });
     cv.addEventListener("pointerup", e => { const x = stagePt(e.clientX, e.clientY).x; if (sx !== null && Math.abs(x - sx) > 40) flip(x < sx ? +1 : -1); sx = null; });
-    $("hgGo").addEventListener("click", () => { AUDIO.sfx("click"); chooseShip.last = d.id; newRun(epicId, d.id); });
+    $("hgGo").addEventListener("click", () => { AUDIO.sfx("click"); pickShip(d.id); newRun(epicId, d.id); });
     $("back").addEventListener("click", () => { closeSheet(); showTitle(); });
   }
   render();
 }
+// the hangar's pick survives a reload (blind QA 3: the opening went back to KESTREL after choosing the Wasp)
+function pickShip(id){ chooseShip.last = id; lsSet("ftlr.ship", id); }
+chooseShip.last = lsGet("ftlr.ship");
+function shipPick(){ const d = [MOD.player, ...(MOD.ships || [])].find(d => d.id === chooseShip.last); return d ? d.id : MOD.player.id; }
 // A painted hull (Retro Diffusion, art/ship_<id>.png), drawn crisp with its backdrop cut away.
 function drawHullArt(cv, def){
   if (def.kit && typeof kitPreview === "function") return kitPreview(cv, def);
@@ -6507,9 +6598,13 @@ const PLAT = {mouse: matchMedia("(hover: hover) and (pointer: fine)").matches, k
 /* ---------- the KEYS button and sheet ---------- */
 (function keysButton(){
   const b = document.createElement("button"); b.className = "topBtn"; b.id = "keysBtn"; b.textContent = "KEYS"; b.setAttribute("aria-label", "Keyboard shortcuts");
-  b.hidden = !PLAT.mouse; // a phone never shows it; an iPad shows it once a keyboard is used
   $("sndBtn").after(b); b.addEventListener("click", () => { AUDIO.sfx("click"); showKeys(); });
+  syncKeysBtns(); requestAnimationFrame(syncKeysBtns); addEventListener("resize", syncKeysBtns);
 })();
+// KEYS shows on an iPad or a desktop from the start (the opening has its own, under the brand), and on any screen once
+// a mouse or a keyboard is used; a phone never shows it (blind QA 3: on the desktop opening it was hidden under the brand)
+function keysWanted(){ return PLAT.mouse || PLAT.keys || document.body.classList.contains("big"); }
+function syncKeysBtns(){ const w = keysWanted(); for (const id of ["keysBtn", "opKeys"]){ const e = $(id); if (e && e.hidden === w) e.hidden = !w; } }
 function showKeys(){
   const row = (k, what) => `<div class="keyRow"><span>${k.split(" ").map(x => `<kbd>${x}</kbd>`).join(" ")}</span><span>${what}</span></div>`;
   const sys = POWERED.map(id => `${SYS_KEYS[id]}`).join(" ");
@@ -6552,13 +6647,15 @@ addEventListener("keydown", e => {
   if (e.target && (e.target.tagName === "TEXTAREA" || e.target.tagName === "INPUT")) return;
   if (e.metaKey || e.ctrlKey || e.altKey) return; // leave the browser's own shortcuts alone
   AUDIO.unlock();
-  if (!PLAT.keys){ PLAT.keys = true; $("keysBtn").hidden = false; } // an iPad with a keyboard: show the key list button
+  if (!PLAT.keys){ PLAT.keys = true; syncKeysBtns(); } // an iPad with a keyboard: show the key list button
   const k = e.key, K = k.length === 1 ? k.toUpperCase() : k, fight = S && S.mode === "fight" && !S.over;
   const op = $("opening") && !$("opening").hidden;
   if (k === "?" || k === "/"){ e.preventDefault(); if (sheetOpen() && /KEYS/.test(($("panel").querySelector("h2") || {}).textContent || "")) closeSheet(); else showKeys(); return; }
   if (k === "Escape"){
     e.preventDefault();
-    if (sheetOpen()){ const b = visBtn("#back, #done, #logDone, #close"); if (b) b.click(); return; }
+    // every sheet with a way out closes on Esc: back/done/close, CONTINUE after an answer, SKIP, and LEAVE STORE
+    // (an event still waiting for an answer has no way out, so Esc leaves it be)
+    if (sheetOpen()){ const b = visBtn("#back, #done, #logDone, #close") || visBtn("#cont") || visBtn("#skip") || visBtn("#leave"); if (b) b.click(); return; }
     if (cancelPick()) return;
     if (S && S.mode === "map" && R && R.sel != null){ R.sel = null; buildMapDeck(); }
     return;
@@ -6570,7 +6667,7 @@ addEventListener("keydown", e => {
       const one = [...$("panel").querySelectorAll(".btnRow .btn.primary, .btnRow .go")].filter(x => !x.disabled && x.offsetParent); if (one.length === 1) one[0].click();
       return; }
     if (op){ const b = $("opCont") || $("opPlay"); if (b) b.click(); return; }
-    if (S && S.mode === "map"){ doJump(); return; }
+    if (S && S.mode === "map"){ if (R && !R.jumping && (R.sel == null || !reachable().includes(R.sel))) sayWhy(whyOff("jumpBtn")); else doJump(); return; }
     return;
   }
   if (k === "ArrowLeft" || k === "ArrowRight"){
@@ -6589,8 +6686,31 @@ addEventListener("keydown", e => {
   if (k === "Tab"){ e.preventDefault(); if (!S.foe.env){ swapFocus(); AUDIO.sfx("click"); } return; }
   if (n >= 1 && n <= 4){ e.preventDefault(); weaponTap(n - 1); return; }
   if (KEY_SYS[K] && S.you.sys[KEY_SYS[K]]){ e.preventDefault(); power(KEY_SYS[K], e.shiftKey ? -1 : 1); hideTip(); return; }
-  if (K === "C"){ actCloak(); return; } if (K === "B"){ actBoard(); return; } if (K === "J"){ actJump(); return; } if (K === "V"){ actVent(); return; }
+  if (KEY_SYS[K]){ sayWhy(`No ${(SYS_LABEL[KEY_SYS[K]] || KEY_SYS[K]).toLowerCase()} on this ship.`); return; }
+  // a key whose button is missing or greyed says why instead of doing nothing (blind QA 3)
+  if (K === "C"){ if (!whyOff("aCloak")) actCloak(); else sayWhy(whyOff("aCloak")); return; }
+  if (K === "B"){ const w = whyOff("aBoard"); if (w) sayWhy(w); else actBoard(); return; }
+  if (K === "J"){ const w = whyOff("aJump"); if (w) sayWhy(w); else actJump(); return; }
+  if (K === "V"){ actVent(); return; }
 });
+/* ---------- why a control does nothing ----------
+   A greyed button (or its key) answers a tap with one short line in the hint, then the line clears itself. */
+function whyOff(id){
+  if (!S || !R) return ""; const you = S.you || R.you;
+  const fight = S.mode === "fight" && !S.over;
+  if (id === "jumpBtn" && S.mode === "map" && !R.jumping) return R.sel == null ? "Pick a beacon first: tap one joined to yours." : "That beacon isn't joined to yours. Pick one next door.";
+  if (id === "probeBtn" && S.mode === "map"){ const here = R.map && R.map.nodes[R.pos]; return here && here.probed ? "You've already probed this beacon." : ""; }
+  if (!fight) return "";
+  if (id === "aJump") return you.ftl >= 1 ? "" : warpLocked(you) ? "Their warp lock is holding your FTL drive." : `FTL drive at ${Math.round(you.ftl*100)}%. It can jump at 100%.`;
+  if (id === "aCloak") return !you.sys.cloak ? "No cloak on this ship." : you.cloakT > 0 ? "Already cloaked." : you.cloakCd > 0 ? `Cloak recharging: ${Math.ceil(you.cloakCd)}s.` : eff(you, "cloak") <= 0 ? `Put power in the cloak first (${SYS_KEYS.cloak}).` : "";
+  if (id === "aBoard"){ if (!you.sys.tele) return "No teleporter on this ship."; if (S.foe.env) return "Nobody to board here.";
+    const aboard = you.crew.some(q => q.hp > 0 && q.on === "foe");
+    return eff(you, "tele") <= 0 ? `Put power in the teleporter first (${SYS_KEYS.tele}).` : you.teleCharge < 1 ? `Teleporter charging: ${Math.round(you.teleCharge*100)}%.` : !aboard && !crewAt(you, "tele", "you").length ? "Send crew to the TELEPORT room first." : ""; }
+  return "";
+}
+function sayWhy(msg){ if (!msg) return; setHint(msg); AUDIO.sfx("click"); clearTimeout(sayWhy.t); sayWhy.t = setTimeout(() => { if ($("hint").textContent === msg) setHint(""); }, 3200); }
+// a disabled button gets no click, but the press still reaches the page: answer it there
+addEventListener("pointerup", e => { const t = e.target instanceof Element ? e.target : null, b = t && t.closest("button"); if (b && b.disabled && !sheetOpen()) sayWhy(whyOff(b.id)); }, true);
 
 /* ---------- mouse: right-click ---------- */
 // a right or middle press never acts as a tap (the system rows, weapons and the canvas all listen for pointer presses)
@@ -6682,20 +6802,23 @@ function canvasTip(e){
 function tipFor(el, e){
   if (!el) return "";
   if (el === cv) return canvasTip(e);
-  if (!S || S.mode !== "fight"){ const id = el.id; return BTN_TIPS[id] ? `<span>${BTN_TIPS[id]}</span>` : ""; }
+  if (!S || S.mode !== "fight"){ const id = el.id; return BTN_TIPS[id] ? `<span>${BTN_TIPS[id]}</span>${el.disabled && whyOff(id) ? `<i>${esc(whyOff(id))}</i>` : ""}` : ""; }
   const sys = el.closest(".sys"); if (sys) return sysTip(sys.dataset.s);
   const ss = el.closest(".ss"); if (ss) return subTip(ss.dataset.s);
   const wep = el.closest(".wep"); if (wep) return wepTip(+wep.dataset.i);
   const cr = el.closest(".crewCard"); if (cr) return crewTip(+cr.dataset.c);
-  const b = el.closest("button"); if (b && BTN_TIPS[b.id]) return `<span>${BTN_TIPS[b.id]}</span>`;
+  const b = el.closest("button"); if (b && BTN_TIPS[b.id]) return `<span>${BTN_TIPS[b.id]}</span>${b.disabled && whyOff(b.id) ? `<i>${esc(whyOff(b.id))}</i>` : ""}`;
   return "";
 }
 function showTipFor(el, e){ placeTip(tipFor(el, e), e); }
 addEventListener("pointermove", e => {
   if (e.pointerType !== "mouse"){ return; }
-  if (!PLAT.mouse){ PLAT.mouse = true; $("keysBtn").hidden = false; }
-  if (sheetOpen() || ($("opening") && !$("opening").hidden) || e.buttons){ hideTip(); return; }
+  if (!PLAT.mouse){ PLAT.mouse = true; syncKeysBtns(); }
   const t = e.target instanceof Element ? e.target : null;
+  // a store card: its full details (the card itself clamps them to two lines)
+  const sc = sheetOpen() && !e.buttons && t && t.closest(".shop .choice");
+  if (sc){ tipAt = null; const d = sc.dataset; placeTip(`<b>${esc(d.name)}</b>${d.detail ? `<span>${esc(d.detail)}</span>` : ""}<i>${esc(d.note)}</i>`, e); return; }
+  if (sheetOpen() || ($("opening") && !$("opening").hidden) || e.buttons){ hideTip(); return; }
   const el = t && (t === cv ? cv : t.closest(".sys, .ss, .wep, .crewCard, button"));
   tipAt = el; showTipFor(el, e);
 }, {passive: true});
