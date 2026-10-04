@@ -3494,15 +3494,23 @@ const RACE_ROW = {human: 0, tinker: 0, myrm: 1, basalt: 1, lumen: 2}, FRAME_COL 
 // drawing of their base's frames. The station poses are the approved painting's own figures (skin.painted),
 // drawn exactly as painted (never mirrored or turned). One square cell per frame, feet at the bottom centre;
 // a standing human fills idx.fig of a cell. A crew member's `look` names their skin; anyone without one is
-// drawn by the older atlas below. Frames: idle, walk1-4, op1-2, sit, link, fight, hurt, down, repair.
+// drawn by the older atlas below. Frames: idle, walk1-4 (facing right; mirrored for left), walkd1-4 (toward the camera),
+// walku1-4 (away from it), op1-2 (op1s: a skin's side-view op1 where its op1 is a painted figure from another angle),
+// sit, link, fight + fight2 (a blow and its follow-through, alternating), hurt, down, repair + repair2 (kneeling at a panel).
 const CREW2 = {im: null, idx: null};
 (() => { const im = new Image(); im.onload = () => { fetch("art/crew_v2.json").then(r => r.ok ? r.json() : null).then(j => { if (!j || !j.skins) return; CREW2.im = im; CREW2.idx = j; SPRITES.clear(); PORTRAITS.clear(); if (S && S.mode === "fight") buildDeck(); }).catch(() => {}); }; im.src = "art/crew_v2.png"; })();
-const CREW2_FALLBACK = {walk1: ["walk1", "walk3"], walk2: ["walk2", "walk3", "walk1"], walk3: ["walk3", "walk1"], walk4: ["walk4", "walk2", "walk1"], fight: ["fight", "op1"], work: ["repair", "op1"], op1: ["op1"], op2: ["op2", "op1"], sit: ["sit", "op1"], link: ["link", "op1"], down: ["down"], hurt: ["hurt"]};
+const CREW2_FALLBACK = {walk1: ["walk1", "walk3"], walk2: ["walk2", "walk3", "walk1"], walk3: ["walk3", "walk1"], walk4: ["walk4", "walk2", "walk1"], fight: ["fight", "op1"], fight2: ["fight2", "fight", "op1"], work: ["repair", "op1"], repair2: ["repair2", "repair", "op1"], op1: ["op1"], op2: ["op2", "op1"], op1s: ["op1s", "op2", "op1"],
+  walkd1: ["walkd1", "walk1"], walkd2: ["walkd2", "walk2", "walk1"], walkd3: ["walkd3", "walk3", "walk1"], walkd4: ["walkd4", "walk4", "walk1"],
+  walku1: ["walku1", "walk1"], walku2: ["walku2", "walk2", "walk1"], walku3: ["walku3", "walk3", "walk1"], walku4: ["walku4", "walk4", "walk1"], sit: ["sit", "op1"], link: ["link", "op1"], down: ["down"], hurt: ["hurt"]};
 function crewLookId(c){ const K_ = CREW2.idx && CREW2.idx.skins; return K_ && c.look && K_[c.look] ? c.look : null; }
 function crewFrame2(c, frame){ const lk = crewLookId(c); if (!lk) return null; const F = CREW2.idx.skins[lk].frames;
   for (const f of CREW2_FALLBACK[frame] || [frame]) if (F[f]) return [lk, f, F[f]]; return F.idle ? [lk, "idle", F.idle] : null; }
 function crewHas(c, frame){ const lk = crewLookId(c); return !!(lk && CREW2.idx.skins[lk].frames[frame]); }
 function crewPainted(c, frame){ const lk = crewLookId(c); return !!(lk && (CREW2.idx.skins[lk].painted || []).includes(frame)); } // drawn as painted: no flip, no turn
+// a painted figure tied to one station (skin.at: the engineer's op1 is the painting's engineer at the engines, seen from
+// behind): true there on a painted ship; anywhere else the skin's own side-view sheet frames are used
+function crewPaintedHere(c, frame, ship){ if (!crewPainted(c, frame)) return false; const at = (CREW2.idx.skins[crewLookId(c)].at || {})[frame];
+  if (!at) return true; const sh = ship && ship.cut && SHAPED[ship.cut.art]; return !!(sh && sh.kd && sh.kd.painted && c.room === at); }
 function crewSprite(c, frame){
   const f2 = crewFrame2(c, frame);
   if (f2){ const key = `v2|${f2[0]}|${f2[1]}`; if (SPRITES.has(key)) return SPRITES.get(key);
@@ -3926,7 +3934,7 @@ function crewFrame(c){
   const t = S ? S.t : 0, seed = (c.seed % 97)/97;
   // hands busy at the machine: the base's repair pose if it has one; else its two console frames in turn, unless one of
   // them is the painting's own figure at a station (a different view: the engineer's op1 is from behind), then the other one alone
-  const work = crewHas(c, "repair") ? ["repair", "repair"] : crewPainted(c, "op1") && crewHas(c, "op2") ? ["op2", "op2"] : crewPainted(c, "op2") ? ["op1", "op1"] : ["op1", "op2"];
+  const work = crewHas(c, "repair") ? ["repair", crewHas(c, "repair2") ? "repair2" : "repair"] : crewPainted(c, "op1") && crewHas(c, "op2") ? ["op2", "op2"] : crewPainted(c, "op2") ? ["op1", "op1"] : ["op1", "op2"];
   if (c.act === "repair" || c.act === "seal") return ((t*3 + seed) % 1) < 0.5 ? work[0] : work[1];
   if (c.act === "fire") return ((t*2.2 + seed) % 1) < 0.6 ? work[0] : work[1];
   return "idle";
@@ -3973,14 +3981,16 @@ function drawCrew(ship, g){
     if (c._hpSeen != null && c.hp < c._hpSeen - 1.5) c._hurtAt = now; c._hpSeen = c.hp; // a real blow (not the slow burn of fire or thin air)
     const st = !dead && sh && typeof kitStation === "function" ? kitStation(ship, c) : null; // at a station: its spot, facing and pose
     const opBeat = ((t*1.4 + seed*3.1) % 1) < 0.7; // working a console: hands moving now and then, never a frozen frame
-    const opF = st ? (st.pose === "sit" ? "sit" : st.pose === "link" && c.mindLink ? "link" : crewPainted(c, "op1") ? "op1" : opBeat ? "op1" : "op2") : null; // a station's pose
+    // a station's pose: seated, a queen's mind link, the painted figure at its own station, else two console frames in turn
+    // (a skin whose op1 is painted from another angle works other consoles side-on: op1s and op2)
+    const opF = st ? (st.pose === "sit" ? "sit" : st.pose === "link" && c.mindLink ? "link" : crewPaintedHere(c, "op1", ship) ? "op1" : opBeat ? (crewPainted(c, "op1") ? "op1s" : "op1") : "op2") : null;
     const asPainted = !!(opF && crewPainted(c, opF)); // the painting's own figure at its own station: exactly as painted
     let strike = false, ox = 0, oy = 0, flip = asPainted ? false : st ? Math.cos(st.face*Math.PI/180) < -0.2 : !!c._left;
     // fighting: face the one they squared up to (navTarget stages the pair face to face), lunge on the blow; the other flashes and is shoved
     const foe = !dead && c.act === "fight" ? ((c._foe && c._foe.hp > 0 && c._foe.on === c.on && c._foe.room === c.room && c._foe.gx != null) ? c._foe : allCrew().find(o => o.on === c.on && o.hp > 0 && o.side !== c.side && o.room === c.room && o.gx != null)) : null;
     if (foe){ const fp = crewPx(foe), dir = fp.x > p.x + 0.5 ? 1 : fp.x < p.x - 0.5 ? -1 : (mine ? -1 : 1); flip = dir < 0;
       const per = 0.6 + (c.seed % 7)*0.02, ph = ((t + (c.seed % 100)/37) % per)/per;
-      if (ph < 0.18 && live){ strike = true; ox += dir*cs*0.09*Math.sin(ph/0.18*Math.PI); if (live && !c._struck){ c._struck = true; foe._flashAt = now; foe._kb = dir;
+      if (ph < 0.18 && live){ strike = true; ox += dir*cs*0.09*Math.sin(ph/0.18*Math.PI); if (live && !c._struck){ c._struck = true; c._blows = (c._blows || 0) + 1; foe._flashAt = now; foe._kb = dir;
         for (let i = 0; i < 4; i++) S.parts.push({x: p.x + dir*cs*0.25, y: feet - cs*0.55 + rnd(-cs*0.1, cs*0.1), vx: dir*rnd(20, 70), vy: rnd(-50, 20), life: 0.2, col: foe.species === "myrm" ? "#9dff6b" : "#ffd28a", s: 1.6}); } }
       else c._struck = false; }
     if (c._flashAt && now - c._flashAt < 160) ox += (c._kb || 0)*cs*0.06*(1 - (now - c._flashAt)/160); // knocked back a little by the blow
@@ -4001,8 +4011,11 @@ function drawCrew(ship, g){
     if (!mine && !dead){ X.strokeStyle = "rgba(255,90,70,.85)"; X.lineWidth = 2; X.beginPath(); X.ellipse(p.x, feet - cs*0.02, cs*0.3, cs*0.11, 0, 0, 6.283); X.stroke(); } // their crew: a red ring at the feet
     if (SP(c).powers && !dead){ const gl = X.createRadialGradient(p.x, feet - cs*0.5, 0, p.x, feet - cs*0.5, cs*0.7); gl.addColorStop(0, "rgba(255,240,170,.4)"); gl.addColorStop(1, "rgba(255,240,170,0)"); X.fillStyle = gl; X.fillRect(p.x - cs, feet - cs*1.2, cs*2, cs*1.4); }
     if (mine && S.selC === S.you.crew.indexOf(c)){ X.strokeStyle = "#ffc857"; X.lineWidth = 2; X.beginPath(); X.ellipse(p.x, feet - cs*0.02, cs*0.34, cs*0.12, 0, 0, 6.283); X.stroke(); }
-    const walkF = v2 ? ["walk1", "walk2", "walk3", "walk4"][Math.floor(cyc*4) % 4] : ["walk1", "walk2"][Math.floor(cyc*2) % 2];
-    const frame = dead ? (crewHas(c, "down") ? "down" : "idle") : hurt ? "hurt" : foe ? (strike ? "fight" : "idle") : opF || (c.act === "walk" ? walkF : crewFrame(c)); // a fighter strikes in the lunge, stands guard between
+    // walking up or down the screen: the toward-camera / away frames (with some give, so a diagonal doesn't flicker between views)
+    if (c.act === "walk"){ const vy = Math.sin(c.face || 0), vx = Math.abs(Math.cos(c.face || 0)); c._vert = c._vert ? (Math.abs(vy) > vx*0.8 ? (vy > 0 ? "d" : "u") : "") : (Math.abs(vy) > vx*1.25 ? (vy > 0 ? "d" : "u") : ""); }
+    const wv = v2 && c._vert && crewHas(c, "walk" + c._vert + "1") ? "walk" + c._vert : "walk";
+    const walkF = v2 ? wv + (1 + Math.floor(cyc*4) % 4) : ["walk1", "walk2"][Math.floor(cyc*2) % 2];
+    const frame = dead ? (crewHas(c, "down") ? "down" : "idle") : hurt ? "hurt" : foe ? (strike ? ((c._blows || 0) % 2 === 0 ? "fight2" : "fight") : "idle") : opF || (c.act === "walk" ? walkF : crewFrame(c)); // a fighter strikes in the lunge, stands guard between
     const spr = crewSprite(c, frame);
     c._frame = frame; c._flip = flip; // (read by the frame-strip QA)
     X.save(); X.imageSmoothingEnabled = true; X.imageSmoothingQuality = "high"; // the 128 px figures are drawn smaller: smooth, not jagged
@@ -4014,14 +4027,14 @@ function drawCrew(ship, g){
       if (crewHas(c, "down")){ X.translate(p.x, feet); if (flip) X.scale(-1, 1); X.drawImage(spr, -Z/2, -Z*0.97, Z, Z); } // the sheet's own fall
       else { X.translate(p.x, feet - cs*0.1); X.rotate((flip ? -1 : 1)*k*Math.PI/2); X.translate(0, -Z*0.45); if (flip) X.scale(-1, 1); X.drawImage(spr, -Z/2, -Z*0.52, Z, Z); } }
     else if (asPainted){ X.translate(p.x, feet); X.scale(1, breath); X.drawImage(spr, -Z/2, -Z*0.97, Z, Z); }
-    else if (opF === "sit" && crewHas(c, "sit")){ X.translate(p.x, feet - Z*0.42); X.rotate((st.face + 90)*Math.PI/180); X.scale(1, breath); X.drawImage(spr, -Z/2, -Z/2, Z, Z); } // seated, seen from behind, turned the way the seat faces
+    else if (opF === "sit" && crewHas(c, "sit")){ X.translate(p.x, feet); if (Math.cos(st.face*Math.PI/180) < -0.2) X.scale(-1, 1); X.scale(1, breath); X.drawImage(spr, -Z/2, -Z*0.97, Z, Z); } // seated, seen from above and behind, facing the way the seat faces (as the painted captain sits)
     else if (spr.square){ X.translate(p.x + ox, feet + oy); if (flip) X.scale(-1, 1); X.scale(1, breath); X.drawImage(spr, -Z/2, -Z*0.97, Z, Z);
       if (c._flashAt && now - c._flashAt < 90){ X.globalAlpha = 0.35; X.drawImage(whiteOf(spr), -Z/2, -Z*0.97, Z, Z); } }
     else { const w = cs*0.7, hh = cs*0.92; X.translate(p.x + ox, feet + oy); if (flip) X.scale(-1, 1); X.drawImage(spr, -w/2, -hh, w, hh);
       if (c._flashAt && now - c._flashAt < 90){ X.globalAlpha = 0.35; X.drawImage(whiteOf(spr), -w/2, -hh, w, hh); } }
     X.restore();
     if (dead) continue;
-    if (c.mindLink && c.act === "man" && sh && opF === "link"){ const kt = sh.kit[c.room], ca = cutArt(ship); // the queen works the console by mind: antennae aglow, a violet thread to it
+    if (c.mindLink && c.act === "man" && sh && (opF === "link" || (opF && opF.startsWith("op")))){ const kt = sh.kit[c.room], ca = cutArt(ship); // the queen works the console by mind: antennae aglow, a violet thread to it
       const tip = spriteTips(spr), pulse = 0.6 + 0.3*Math.sin(t*4 + c.seed), hx = p.x + (tip.x - 0.5)*Z, hy = feet - (0.97 - tip.y)*Z;
       X.save(); X.globalCompositeOperation = "lighter";
       for (const ax of [tip.x0, tip.x1]){ const gx = p.x + (ax - 0.5)*Z, r = cs*0.16*(0.8 + 0.3*pulse), gl = X.createRadialGradient(gx, hy, 0, gx, hy, r);
