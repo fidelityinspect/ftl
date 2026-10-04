@@ -371,6 +371,7 @@ body.land .sys.hurt{box-shadow:inset 0 0 12px rgba(255,80,50,.55)}
 .ss .pw b{width:5px;height:6px}
 .ss.s-weapons{grid-column:1/-1}
 .ss.hurt{box-shadow:inset 0 0 9px rgba(255,80,50,.6)}.ss.off{filter:saturate(.35) brightness(.7)}
+.ss.s-doors{cursor:pointer}.ss.s-doors.held{border-color:rgba(255,176,80,.8);background:rgba(48,30,12,.85)}.ss.s-doors.held .lbl{color:#ffc27a}
 .sys.s-drones{--tint:#d0a640}.sys.s-tele{--tint:#b56bff}.sys.s-lock{--tint:#ff5a46}.sys.s-sensors{--tint:#3fd2a8}.sys.s-doors{--tint:#e6c23a}
 /* weapons: the Gemini weapon buttons, with the charge ring round them */
 body.land #wepBox{right:max(10px,env(safe-area-inset-right,0px));bottom:max(8px,env(safe-area-inset-bottom,0px));width:auto} /* a safe margin from the screen edges */
@@ -570,7 +571,7 @@ const DEFAULT_MOD = {
     laserFlight: 0.45,         // seconds a laser bolt flies
     missileFlight: 0.9,
     fireSysTime: 12.5,         // seconds of fire per bar of system damage (FTL F2: 0.08 per s)
-    fireSpread: 0.05,          // chance per second a fire spreads to a neighbouring room, at full air (scaled by the room's oxygen)
+    fireSpread: 0.05,          // chance per second a fire spreads through each OPEN door to the next room, at full air (scaled by the room's oxygen); never through a sealed door
     fireCrewDps: 2.1,          // hp per second lost standing in fire (FTL F1: 2.13)
     extinguishTime: 5.7,       // fire-fighting pace: against the fire's regrowth one crew needs about 10.5 s (FTL F5)
     breachCrewDps: 0,          // a breach never hurts crew directly; only the thin air does (FTL O-rules)
@@ -583,6 +584,11 @@ const DEFAULT_MOD = {
     walkSpeed: 2.2,            // FTL tiles per second a Terran walks (FTL K2: 2.19)
     restTime: 10,              // seconds the crew rest in the medbay at the beacon after a fight, healing at its rate
     surrenderChance: 0.5,      // share of crewed ships (not Skitterer, not bosses) that offer to surrender at 20-40% hull (FTL A3)
+    fleeOdds: [1, 0.15, 0.6, 1], // share of the runner ships that actually run, by sector (index = sector, the last for later ones): sector 1 rarely (PILLARS 9), FTL's every runner from sector 3
+    fleeLateS1: 0.5,           // sector 1's runners wait this much longer: they spool at 10-20% hull instead of 20-40% (PILLARS 9)
+    enemyVentDelay: 3,         // seconds your boarders hold a hull room the enemy crew can't win before it opens that room's airlocks (ESTIMATE)
+    enemyHealAt: 0.35,         // an enemy crew member below this share of health walks to a working medbay (ESTIMATE)
+    enemyDefendOdds: 1.2,      // enemy defenders gather until they are this much stronger than the boarders in a room (ESTIMATE)
     stalemateTime: 60,         // seconds with no hull damage on either side before the enemy gives up and jumps (FTL A6); +2 fuel
     stalemateFuel: 2,
     cloakTime: 5,              // seconds of cloak per level
@@ -610,7 +616,7 @@ const DEFAULT_MOD = {
     o2Leak: 1.2,               // % per second every room loses with no working oxygen system (measured: ~1.2)
     o2BreachDrain: 6,          // % per second a breached room loses (FTL O3: oxygen 2 holds one breach, oxygen 1 cannot)
     o2VentDrain: 22,           // % per second a vented room loses (airlocks open)
-    o2Flow: 0.25,              // how fast neighbouring rooms even out (share per second)
+    o2Flow: 0.25,              // how fast two rooms even out through an open door (share of the difference per second); a sealed door holds air (FTL O5)
     o2Suffocate: 5,            // below this % in their room crew start to suffocate (FTL O6)
     suffocateDps: 5.5,         // hp per second lost while suffocating (measured: ~5.5)
     fireO2Burn: 1,             // % per second a burning room consumes (FTL F3: 0.96)
@@ -744,12 +750,15 @@ const DEFAULT_MOD = {
   // 12 -> 9 so sector 1's longest fight stays under 50 s. Sector-1 boarding is softened in enemyAI (p2.js), not here.
   // Retuned 2026-10-04 (combat rules pass, docs/COMBAT-RULES.md): boarders now have to break doors and take 15 s a bar,
   // so the BROODMOTHER (a boarding boss) gets back a second basic laser (balance sim: 77% -> 55% wins).
+  // Retuned 2026-10-04 (combat follow-ups): the enemy crew now repair shields first, heal, and board where it hurts, so the
+  // BROODMOTHER got easier (64% -> 70%); hull 44 -> 48 and crew 7 -> 10 put it back at 52%. RAIDER hull 11 -> 10 keeps
+  // sector 1's longest fight under 55 s now that sector-1 ships rarely run (57 s -> 51 s).
   // flees: the ship runs for it at 20-40% hull (FTL A3, A4); crewed non-Skitterer ships may offer to surrender first (rules.surrenderChance).
   enemies: [
     {name:"PICKET", size:"small",   tier:0, hull:8,  crew:2, missiles:2, systems:{shields:{level:2},weapons:{level:2},engines:{level:2},pilot:{level:1}}, weapons:["basic","basic"], flees:true},
     {name:"SKIMMER", size:"small",  tier:0, hull:8,  crew:2, missiles:3, systems:{shields:{level:2},weapons:{level:1},engines:{level:4},pilot:{level:1}}, weapons:["leto"], flees:true},
     {name:"SCRAPPER", size:"small", tier:0, hull:11, crew:2, missiles:0, systems:{weapons:{level:2},engines:{level:1},pilot:{level:1}}, weapons:["burst1"], flees:true},
-    {name:"RAIDER", size:"small",   tier:1, hull:11, crew:3, missiles:3, systems:{shields:{level:2},weapons:{level:2},engines:{level:2},pilot:{level:1}}, weapons:["basic","ion"], flees:true},
+    {name:"RAIDER", size:"small",   tier:1, hull:10, crew:3, missiles:3, systems:{shields:{level:2},weapons:{level:2},engines:{level:2},pilot:{level:1}}, weapons:["basic","ion"], flees:true},
     {name:"GUNBOAT", size:"medium",  tier:1, hull:9, crew:3, missiles:4, systems:{shields:{level:2},weapons:{level:2},engines:{level:2},pilot:{level:1}}, weapons:["heavy","leto"], flees:true},
     {name:"MYRM SKIFF", size:"medium",tier:1, hull:10, crew:3, species:"myrm", missiles:2, systems:{shields:{level:2},weapons:{level:1},engines:{level:2},pilot:{level:1},tele:{level:1}}, weapons:["basic"]},
     {name:"WRAITH", size:"small",   tier:2, hull:12, crew:3, missiles:4, systems:{shields:{level:2},weapons:{level:3},engines:{level:3},pilot:{level:1},cloak:{level:1}}, weapons:["heavy","burst1"], flees:true},
@@ -780,7 +789,7 @@ const DEFAULT_MOD = {
     weapons:["heavy2","burst2","ion","basic"], drones:["defense"], phase2:["hermes","glaive"]},
   // The final enemy depends on what has been chasing you. Fleets and novas end on the boss above.
   bosses: {
-    swarm: {name:"BROODMOTHER", size:"large", tier:4, hull:44, crew:7, species:"myrm", combat:true, missiles:6,
+    swarm: {name:"BROODMOTHER", size:"large", tier:4, hull:48, crew:10, species:"myrm", combat:true, missiles:6,
       systems:{shields:{level:4},weapons:{level:6},engines:{level:3},pilot:{level:1},drones:{level:5},tele:{level:1}},
       weapons:["flak","basic","basic"], drones:["combat","combat","defense"], phase2:["chain"]},
     void:  {name:"THE HOLLOW", size:"large", tier:4, hull:36, crew:5, species:"lumen", missiles:8,
@@ -860,7 +869,7 @@ function workMult(c){
 function gainXp(c, skill, amt){
   if (c.side !== "you" || !c.xp) return;
   const before = lvl(c, skill); c.xp[skill] = (c.xp[skill] || 0) + amt;
-  if (lvl(c, skill) > before){ float(S[c.on], c.room, `${c.name.toUpperCase()}: ${SKILL_LABEL[skill].toUpperCase()} ${lvl(c,skill)}`, "#ffc857"); bark(c, "levelup", true); AUDIO.sfx("buy"); }
+  if (lvl(c, skill) > before){ float(S[c.on], c.room, `${c.name.toUpperCase()}: ${SKILL_LABEL[skill].toUpperCase()} ${lvl(c,skill)}`, "#ffc857"); bark(c, "levelup", true); AUDIO.ui("levelup"); }
 }
 
 /* ---------------- barks ---------------- */
@@ -1030,7 +1039,10 @@ function buildEnemy(tpl, sector, seed, opts = {}){
     art: tpl === MOD.boss ? "flagship" : (MOD.bosses && tpl === MOD.bosses.swarm) ? "broodmother" : (MOD.bosses && tpl === MOD.bosses.void) ? "hollow" : ""
   };
   // FTL A3: many ships run at 20-40% hull; crewed (non-Skitterer) ships may first offer to surrender there
-  if (!opts.boss){ ship.fleeAt = ship.flees ? 0.2 + 0.2*r() : 0;
+  // PILLARS 9: a sector-1 win should pay. Only fleeOdds[sector] of the runner ships run (15% in sector 1, 60% in 2, all
+  // from 3, as in FTL), and in sector 1 they wait until 10-20% hull (COMBAT-RULES FL1)
+  if (!opts.boss && ship.flees && r() >= byLevel(MOD.rules.fleeOdds || [1], sector)) ship.flees = false;
+  if (!opts.boss){ ship.fleeAt = ship.flees ? (0.2 + 0.2*r())*(sector <= 1 ? (MOD.rules.fleeLateS1 || 1) : 1) : 0;
     ship.surrenderAt = e.species !== "myrm" && r() < (MOD.rules.surrenderChance || 0) ? 0.2 + 0.2*r() : 0; }
   for (const id of Object.keys(ship.sys)) ensureRoom(ship, id);
   const dm = dims(ship); for (const q of ship.layout) q.x = dm.c - q.x - q.w; // mirror: their nose (and pilot) faces you
@@ -1215,7 +1227,7 @@ function ignite(ship, rid, kind){
   if (!room(ship, rid)) return;
   const h = ship.hz[rid] || (ship.hz[rid] = {fire:0, breach:0, ft:0});
   if (h[kind] <= 0){
-    float(ship, rid, kind === "fire" ? "FIRE" : "BREACH", kind === "fire" ? "#ffb347" : "#9fd8ff");
+    float(ship, rid, kind === "fire" ? "FIRE" : "BREACH", kind === "fire" ? "#ffb347" : "#9fd8ff"); AUDIO.ignite(ship, kind);
     if (ship.you){ const here = crewAt(ship, rid, "you"); if (here.length) bark(pick(here), kind); }
   }
   h[kind] = 100;
@@ -1275,7 +1287,7 @@ function envTick(dt){
     if (Math.random() < 0.3 + prog*0.3) hitRoom(you, rid, 1, {type:"env"});
     return;
   }
-  if (k.shield && you.layers > 0){ you.layers--; you.shieldHit = 1; float(you, rid, "SHIELD", "#5fd4e8"); AUDIO.sfx("shield"); return; }
+  if (k.shield && you.layers > 0){ you.layers--; you.shieldHit = 1; float(you, rid, "SHIELD", "#5fd4e8"); AUDIO.shield(you); return; }
   const dmg = k.dmg[0] + (Math.random() < prog ? k.dmg[1] - k.dmg[0] : 0);
   if (dmg > 0) hitRoom(you, rid, dmg, {type:"env"});
   if (!S.over){ if (Math.random() < (k.fire || 0)) ignite(you, rid, "fire"); if (Math.random() < (k.breach || 0)) ignite(you, rid, "breach"); }
@@ -1286,6 +1298,7 @@ function prepShip(ship){
   // a teleporter is ready when a fight opens (FTL T3); the enemy waits until its crew have manned up (enemyQuietTime)
   ship.shT = 0; ship.flash = 0; ship.hz = {}; ship.cloakT = 0; ship.cloakCd = 0; ship.teleCharge = 1; ship.ftl = 0; ship.fleeing = false; ship.phase2done = false;
   ship.o2 = {}; ship.vent = {}; for (const r of ship.layout || []) ship.o2[r.id] = 100;
+  if (typeof doorsReset === "function") doorsReset(ship); // FTL D6: every door sealed and whole again
   ship.weapons.forEach(w => { w.charge = 0; w.target = null; w.stack = 0; }); // every gun starts cold (FTL C9)
   ship.drones.forEach(d => { d.t = 0; d.ang = Math.random()*6.283; });
   for (const c of ship.crew){ if (c.hp <= 0) continue; c.on = ship.key; c.gx = null; c.gy = null; c.fix = 0; c.grief = 0; c.hurtSaid = false; if (!room(ship, c.dest)) c.dest = ship.layout[0].id; c.room = c.dest; }
@@ -1369,10 +1382,11 @@ function update(dt){
   }
   stepFx(dt);
   if (S.foe.env) envTick(dt);
-  S.aiT -= dt; if (S.aiT <= 0 && !S.foe.env){ S.aiT = 0.4; enemyAI(); }
+  S.aiT -= dt; if (S.aiT <= 0 && !S.foe.env){ S.aiT = 0.4; enemyAI(0.4); }
   const crew = allCrew();
   navDoorsTick(S.you, dt); navDoorsTick(S.foe, dt); // doors open ahead of crew and shut behind them
   for (const c of crew) crewTick(c, dt);
+  AUDIO.crew(crew, dt, S); // footsteps, punches, tools, extinguishers (src/audio.js)
   bondTick(dt);
   for (const c of crew) if (c.hp <= 0 && !c.dead){
     c.dead = true;
@@ -1383,15 +1397,8 @@ function update(dt){
   }
   if (!S.saidLow && S.you.hull > 0 && S.you.hull <= S.you.maxHull*0.3){ S.saidLow = true; barkAny("lowhull"); }
   if (S.you.sys.shields && S.you.layers === 0 && maxLayers(S.you) === 0 && S.t - S.saidShields > 25){ S.saidShields = S.t; barkAny("shieldsdown", c => c.on === "you"); }
-  // air running out where your crew stand: say so, and why, before anyone chokes (blind QA 2026-10-04: a whole crew
-  // suffocated on a ship with half its hull and nothing said why)
-  if (S.you.o2 && S.t - (S.saidAir || -99) > 20){
-    const low = S.you.crew.filter(c => c.hp > 0 && c.on === "you" && !SP(c).nobreath && (S.you.o2[c.room] ?? 100) < 35);
-    if (low.length){ S.saidAir = S.t; const ox = S.you.sys.oxygen, vented = Object.values(S.you.vent || {}).some(Boolean);
-      const why = vented ? "Close the vents (VENT)" : !ox ? "Get them to rooms with air" : eff(S.you, "oxygen") <= 0 ? (ox.dmg > 0 ? "OXYGEN is broken: send someone to repair it" : "Power OXYGEN on the left") : "Patch the breaches and keep OXYGEN powered";
-      setHint(`Air is running out where ${low.map(c => c.name).join(", ")} ${low.length > 1 ? "are" : "is"}. ${why}, or they will suffocate.`);
-      float(S.you, low[0].room, "LOW AIR", "#ff9bb0"); AUDIO.sfx("click"); } }
   clampPower(S.you); restorePower(S.you); clampPower(S.foe); autoPowerEnemy(S.foe);
+  AUDIO.frame(S); // fire and breach loops, the low-hull alarm, the drive-ready chime, shields back up
   if (!S.over){
     if (!S.you.crew.some(c => c.hp > 0)) endFight("dead", "crew");
     else if (!S.foe.env && !S.foe.crew.some(c => c.hp > 0)) endFight("captured");
@@ -1403,7 +1410,7 @@ function update(dt){
 function crewDied(c){
   const ship = S[c.on];
   float(ship, c.room, c.cause === "suffocated" ? `${c.name.toUpperCase()} SUFFOCATED` : `${c.name.toUpperCase()} LOST`, "#ff6b4a");
-  AUDIO.sfx("death");
+  AUDIO.crewDeath();
   S.slow = 1.4; S.redFlash = Math.max(S.redFlash, 0.35);
   const last = (c.bio && c.bio.lines && c.bio.lines.last) || pick(LAST_WORDS);
   c.lastWords = last;
@@ -1446,7 +1453,7 @@ function updateDrones(me, them, dt){
       const tgt = pick(them.layout.filter(r => them.sys[r.id]).concat(them.layout));
       S.fx.push({kind:"laser", from:me, to:them, room:tgt.id, t:0, dur:MOD.rules.laserFlight*1.2,
         w:{type:"laser", dmg:1, shots:1, name:"drone", fire:0.1}, drone:d, jx:rnd(-.3,.3), jy:rnd(-.25,.25)});
-      AUDIO.sfx("laser", 0.5);
+      AUDIO.weapon({type:"laser", shots:1, dmg:1, id:"drone"}, me);
     }
   }
 }
@@ -1459,8 +1466,9 @@ function updateHazards(ship, dt){
       const s = ship.sys[rid];
       if (s){ h.ft += dt; if (h.ft >= R_.fireSysTime){ h.ft = 0; if (s.dmg < s.level){ s.dmg++; clampPower(ship); } } }
       for (const c of here) if (!SP(c).fireproof) c.hp -= R_.fireCrewDps*dt;
-      // closed doors check the spread: each working door level cuts it by a quarter
-      if (Math.random() < R_.fireSpread*dt*((ship.o2 && ship.o2[rid] !== undefined ? ship.o2[rid] : 100)/100)*(ship.sys.doors ? 1 - 0.25*cap(ship, "doors") : 1)){ const nb = neighbors(ship, rid); if (nb.length) ignite(ship, pick(nb), "fire"); }
+      // fire crosses only an open door (held open, mid-crossing or broken), never a sealed door or a wall (COMBAT-RULES FI3)
+      const air = (ship.o2 && ship.o2[rid] !== undefined ? ship.o2[rid] : 100)/100;
+      for (const d of doorLinks(ship)) if (d.o > 0.05 && (d.a === rid || d.b === rid) && Math.random() < R_.fireSpread*dt*air*d.o) ignite(ship, d.a === rid ? d.b : d.a, "fire");
     }
     if (h.breach > 0 && R_.breachCrewDps > 0) for (const c of here) c.hp -= R_.breachCrewDps*dt;
   }
@@ -1477,12 +1485,13 @@ function updateOxygen(ship, dt){
     if (h && h.breach > 0) o -= R_.o2BreachDrain*dt;
     if (ship.vent[id]) o -= R_.o2VentDrain*dt;
     if (h && h.fire > 0){ o -= R_.fireO2Burn*dt; if (o < R_.fireNeedsO2){ h.fire = 0; h.ft = 0; } }
-    // air moves through the doors toward the neighbours' average; a vented room has its
-    // inner doors sealed and its airlocks open, so it only loses air (and gives none)
-    const nb = ship.vent[id] ? [] : neighbors(ship, id).filter(n => !ship.vent[n]);
-    if (nb.length){ const avg = nb.reduce((a,n) => a + (ship.o2[n] ?? 100), 0)/nb.length; o += (avg - o)*Math.min(1, R_.o2Flow*dt); }
-    next[id] = clamp(o, 0, 100);
+    next[id] = o;
   }
+  // air crosses only open doors (FTL O5): a sealed door or a wall holds it. Through an open door two rooms even out
+  // (o2Flow of the difference a second), so a door held open beside a vented room empties the next room too
+  for (const d of doorLinks(ship)){ if (!(d.o > 0) || next[d.a] === undefined || next[d.b] === undefined) continue;
+    const f = ((ship.o2[d.a] ?? 100) - (ship.o2[d.b] ?? 100))*Math.min(0.5, R_.o2Flow*d.o*dt); next[d.a] -= f; next[d.b] += f; }
+  for (const id of ids) next[id] = clamp(next[id], 0, 100);
   ship.o2 = next;
   for (const c of allCrew()){
     if (c.hp <= 0 || c.on !== ship.key || SP(c).nobreath) continue;
@@ -1529,41 +1538,89 @@ function crewTick(c, dt){
     // one repair counter per system: everyone working on it adds their pace (FTL I7: two Terrans fix a bar in 6.25 s)
     if (s && s.dmg > 0){
       s.rep = (s.rep || 0) + dt / R_.repairTime * work; c.act = walking ? "walk" : "repair";
-      if (s.rep >= 1){ s.rep -= 1; s.dmg--; if (!s.dmg) s.rep = 0; float(ship, c.room, "REPAIRED", "#7cf29a"); gainXp(c, "repair", 8); if (Math.random() < 0.25) bark(c, "repair"); }
+      if (s.rep >= 1){ s.rep -= 1; s.dmg--; if (!s.dmg) s.rep = 0; float(ship, c.room, "REPAIRED", "#7cf29a"); if (ship.you) AUDIO.ui("fixed"); gainXp(c, "repair", 8); if (Math.random() < 0.25) bark(c, "repair"); }
     } else { if (s) s.rep = 0; if (s && c.act !== "walk") c.act = canMan(c) ? "man" : "idle"; }
   } else {
     if (s && s.dmg < s.level){
       s.sab += dt*sp.combat; c.act = walking ? "walk" : "repair";
       if (s.sab >= R_.sabotageTime){ s.sab = 0; s.dmg++; S.lastHullT = S.t; float(ship, c.room, "SABOTAGED", "#ff9b5c"); clampPower(ship); if (!ship.you) autoPowerEnemy(ship); }
-    } else if (c.side === "foe"){
-      const next = ship.layout.filter(q => ship.sys[q.id] && ship.sys[q.id].dmg < ship.sys[q.id].level);
-      if (next.length) c.dest = pick(next).id;
-    }
+    } else if (c.side === "foe"){ const next = boardTarget(ship, c.room); if (next) c.dest = next; } // on to the next room that hurts you most (AI1)
   }
 }
-function enemyAI(){
-  const f = S.foe, you = S.you;
+/* ---------------- the enemy's crew (FTL A1-A2 give only the outline; docs/COMBAT-RULES.md AI1-AI3 are ESTIMATES) ---------------- */
+// how hard a group hits hand to hand: health x race x combat skill (defenders on their own ship +30%, CO1)
+function fightPower(cs, home){ return cs.reduce((a, c) => a + Math.max(0, c.hp)*SP(c).combat*(1 + 0.2*lvl(c, "combat"))*(home ? 1.3 : 1), 0); }
+// what wrecking this room of yours does to you, the reason a boarding party picks it (AI1): your shields let their guns
+// through, your guns hurt them, your helm dodges and jumps, your oxygen keeps your crew breathing. A room your crew
+// already hold is a fight before it is sabotage, and a room with no air kills the boarders, so both count for less.
+function boardValue(you, rid){
+  const s = you.sys[rid]; if (!s || s.dmg >= s.level) return 0;
+  const crew = you.crew.filter(c => c.hp > 0 && c.on === you.key), breathers = crew.filter(c => !SP(c).nobreath).length;
+  const v = {shields: 2 + 2*maxLayers(you), weapons: 2 + 8*you.weapons.filter(w => w.on).reduce((a, w) => a + weaponDps(w), 0),
+    pilot: 2 + evasion(you)/10, oxygen: 1 + 0.6*breathers, engines: 1 + evasion(you)/20, medbay: 1.5, tele: 2, cloak: 2, drones: 2, lock: 2.5, doors: 1, sensors: 0.5}[rid] ?? 0.5;
+  const air = you.o2 ? (you.o2[rid] ?? 100) : 100;
+  return v/(1 + fightPower(crewAt(you, rid, you.key), true)/150)*((you.vent && you.vent[rid]) || air < 20 ? 0.1 : 1);
+}
+function boardTarget(you, skip){ let best = null, bv = 0; for (const q of you.layout){ if (q.id === skip) continue; const v = boardValue(you, q.id); if (v > bv){ bv = v; best = q.id; } } return best; }
+// a room on the outer hull has airlocks (a grid ship's room with a side open to space; the painted Kestrel vents any room)
+function hullRoom(ship, rid){
+  const q = room(ship, rid); if (!q) return false; if (ship.you) return true;
+  const at = shipPlan(ship).cellAt, out = (x, y) => at[x + "," + y] === undefined;
+  for (let x = q.x; x < q.x + q.w; x++) if (out(x, q.y - 1) || out(x, q.y + q.h)) return true;
+  for (let y = q.y; y < q.y + q.h; y++) if (out(q.x - 1, y) || out(q.x + q.w, y)) return true;
+  return false;
+}
+// AI2: your boarders hold a hull room its crew can't win: after enemyVentDelay it opens that room's airlocks (its own crew
+// step out first); once the room is clear of boarders it shuts them again. Needs working doors; Lumina don't breathe.
+function enemyVent(f, intr, home, dt){
+  const R_ = MOD.rules, T = f._ventT || (f._ventT = {}); if (!f.vent) f.vent = {};
+  if (!doorsWork(f)) return;
+  for (const rid of Object.keys(f.vent)) if (f.vent[rid] && !intr[rid]){ f.vent[rid] = false; delete T[rid]; float(f, rid, "SEALED", "#7cf29a"); }
+  const guards = home.filter(c => c.station !== "pilot" || home.length === 1);
+  for (const [rid, cs] of Object.entries(intr)){
+    if (f.vent[rid] || !hullRoom(f, rid) || cs.every(c => SP(c).nobreath)){ continue; }
+    if (fightPower(guards, true) >= fightPower(cs, false)*(R_.enemyDefendOdds || 1.2)){ delete T[rid]; continue; } // they can win it: they fight
+    T[rid] = (T[rid] || 0) + dt;
+    if (T[rid] >= (R_.enemyVentDelay ?? 3)){ f.vent[rid] = true; float(f, rid, "VENTING", "#c9b8ff"); setHint(`The ${f.name} is venting its ${SYS_LABEL[rid] || rid} to choke your boarders. Move them or recall them.`); }
+  }
+}
+function enemyAI(dt = 0.4){
+  const f = S.foe, you = S.you, R_ = MOD.rules;
   const home = f.crew.filter(c => c.hp > 0 && c.on === "foe");
+  const intr = {}; for (const c of you.crew) if (c.hp > 0 && c.on === "foe") (intr[c.room] = intr[c.room] || []).push(c);
+  enemyVent(f, intr, home, dt);
   if (home.length){
-    const free = home.slice().sort((a,b) => (a.station === "pilot") - (b.station === "pilot"));
-    const keep = n => free.length > n;
-    const want = new Map();
-    const intr = {}; for (const c of you.crew) if (c.hp > 0 && c.on === "foe") intr[c.room] = (intr[c.room] || 0) + 1;
-    for (const [rid, n] of Object.entries(intr).sort((a,b) => b[1] - a[1])){ for (let k = 0; k < n + 1 && keep(1); k++) want.set(free.shift(), rid); }
-    for (const [rid,h] of Object.entries(f.hz)) if ((h.fire > 0 || h.breach > 0) && keep(1)) want.set(free.shift(), rid);
-    const dmg = Object.entries(f.sys).filter(([,s]) => s.dmg > 0).sort((a,b) => b[1].dmg - a[1].dmg);
-    for (const [rid] of dmg) if (keep(1) && room(f, rid)) want.set(free.shift(), rid);
-    for (const c of free) want.set(c, room(f, c.station) ? c.station : f.layout[0].id);
+    // AI3: a sensible crew. The helm is let go last; one crew member always stays on station.
+    const air = rid => f.o2 ? (f.o2[rid] ?? 100) : 100, open = rid => !(f.vent && f.vent[rid]) && air(rid) >= 15; // no one walks into vacuum
+    const free = home.slice().sort((a, b) => (a.station === "pilot") - (b.station === "pilot")), want = new Map();
+    const keep = n => free.length > n, take = c => { free.splice(free.indexOf(c), 1); };
+    // the wounded rest in a working medbay until nearly whole, unless boarders hold it
+    if (f.sys.medbay && cap(f, "medbay") > 0 && room(f, "medbay") && open("medbay") && !intr.medbay)
+      for (const c of free.slice()){ if (c.hp >= c.maxHp*0.9) c._heal = false; else if (c.hp < c.maxHp*(R_.enemyHealAt ?? 0.35)) c._heal = true;
+        if (c._heal){ want.set(c, "medbay"); take(c); } }
+    // boarders: enough defenders to outfight them (strongest first); a vented room is left to the vacuum
+    for (const [rid, cs] of Object.entries(intr).sort((a, b) => fightPower(b[1]) - fightPower(a[1]))){
+      if (f.vent && f.vent[rid]) continue;
+      const need = fightPower(cs, false)*(R_.enemyDefendOdds || 1.2); let got = 0;
+      for (const c of free.slice().sort((a, b) => (a.station === "pilot") - (b.station === "pilot") || fightPower([b], true) - fightPower([a], true))){ if (got >= need || !keep(1)) break; want.set(c, rid); take(c); got += fightPower([c], true); } }
+    // fires and breaches next (rooms with a system first), then repairs: shields, weapons, helm, engines, oxygen, the rest
+    const hz = Object.entries(f.hz).filter(([rid, h]) => (h.fire > 0 || h.breach > 0) && room(f, rid) && open(rid) && !intr[rid]).sort((a, b) => !!f.sys[b[0]] - !!f.sys[a[0]]);
+    for (const [rid] of hz){ if (!keep(1)) break; const c = free[0]; want.set(c, rid); take(c); }
+    const ORDER = ["shields", "weapons", "pilot", "engines", "oxygen", "medbay", "tele", "cloak", "drones", "lock", "doors", "sensors"];
+    const broken = Object.entries(f.sys).filter(([rid, s]) => s.dmg > 0 && room(f, rid) && open(rid) && !intr[rid] && ![...want.values()].includes(rid)).sort((a, b) => ORDER.indexOf(a[0]) - ORDER.indexOf(b[0]));
+    for (const [rid] of broken){ if (!keep(1)) break; const c = free[0]; want.set(c, rid); take(c); }
+    // everyone else to their station, or to the best air on board if theirs has none
+    const breathe = f.layout.filter(q => open(q.id)).sort((a, b) => air(b.id) - air(a.id))[0];
+    for (const c of free){ const st = room(f, c.station) ? c.station : f.layout[0].id; want.set(c, open(st) || !breathe || SP(c).nobreath ? st : breathe.id); }
     for (const [c, rid] of want) if (c.dest !== rid) c.dest = rid;
   }
   // sector 1 teaches boarding instead of ending the run with it: one boarder, not before 25 s (QA 2026-10-04)
   const s1 = !R || R.sector <= 1, party = s1 ? 1 : 2;
   if (f.sys.tele && f.teleCharge >= 1 && eff(f,"tele") > 0 && S.t >= (s1 ? 25 : (MOD.rules.enemyQuietTime || 0)) && !you.crew.every(c => c.hp <= 0)){
     const onYou = f.crew.filter(c => c.hp > 0 && c.on === "you").length;
-    const avail = home.filter(c => c.station !== "pilot").sort((a,b) => SP(b).combat*b.hp - SP(a).combat*a.hp);
-    if (!onYou && avail.length >= party){
-      const targets = you.layout.filter(r => you.sys[r.id]);
-      const rid = pick(targets).id;
+    const avail = home.filter(c => c.station !== "pilot" && !c._heal).sort((a,b) => SP(b).combat*b.hp - SP(a).combat*a.hp);
+    const rid = boardTarget(you); // AI1: where it hurts you most, not a random room
+    if (!onYou && avail.length >= party && rid){
       for (const c of avail.slice(0, party)){ c.on = "you"; c.dest = c.room = rid; c.gx = null; }
       f.teleCharge = 0; float(you, rid, "BOARDERS", "#ff6b4a"); AUDIO.sfx("teleport"); setHint(`Boarders in your ${SYS_LABEL[rid] || rid}! Send crew to fight them.`);
       barkAny("boarders", c => c.on === "you");
@@ -1605,7 +1662,7 @@ function beamPath(ship, rid, len){
 function fire(me, them, w){
   if (them.env) return;
   if (w.type === "missile") me.missiles--;
-  AUDIO.sfx(w.type);
+  AUDIO.weapon(w, me);
   S.rings.push({ship:me, room:"weapons", life:0.18, muzzle:true});
   const R_ = MOD.rules;
   // beams never miss (FTL H4); every other shot rolls its dodge when it reaches the target (land)
@@ -1646,7 +1703,7 @@ function beamHit(p, rid){
   const {to:them, w} = p;
   const layers = Math.max(0, them.layers - (w.sp || 0));
   const d = Math.max(0, w.dmg - layers);
-  if (d === 0 && w.dmg > 0){ them.shieldHit = 1; float(them, rid, "BLOCKED", "#5fd4e8"); AUDIO.sfx("shield"); return; }
+  if (d === 0 && w.dmg > 0){ them.shieldHit = 1; float(them, rid, "BLOCKED", "#5fd4e8"); AUDIO.shield(them, w); return; }
   if (w.dmg === 0 && layers > 0){ them.shieldHit = 1; float(them, rid, "BLOCKED", "#5fd4e8"); return; }
   if (d > 0) hitRoom(them, rid, d, w);
   if (!S.over) hazardRoll(them, rid, w, d);
@@ -1658,12 +1715,12 @@ function screen(p){
   const R_ = MOD.rules;
   if (w.bomb) return "through"; // a bomb is teleported in (FTL H7): no dodge, no shields
   // dodge is rolled here, as the shot reaches their shield (FTL H1-H2): cloaking or a dead pilot now counts
-  if (Math.random()*100 < evasion(them)){ p.dodge = true; float(them, rid, "MISS", "#8394b3"); return "miss"; }
+  if (Math.random()*100 < evasion(them)){ p.dodge = true; float(them, rid, "MISS", "#8394b3"); AUDIO.miss(them); return "miss"; }
   const sp = w.sp || 0; // shield piercing: this many layers let the shot through untouched
   // an ion shot on a raised shield: the layer takes it, and (FTL) its ion locks the shield system 5 s a point
-  if (w.type === "ion" && them.layers > sp){ them.layers--; them.shieldHit = 1; if (R_.ionLocksShields && them.sys.shields) them.sys.shields.ion += R_.ionDuration*(w.ion || 1); float(them, rid, R_.ionLocksShields ? "IONIZED" : "SHIELD", "#9d8cff"); AUDIO.sfx("shield"); return "blocked"; }
+  if (w.type === "ion" && them.layers > sp){ them.layers--; them.shieldHit = 1; if (R_.ionLocksShields && them.sys.shields) them.sys.shields.ion += R_.ionDuration*(w.ion || 1); float(them, rid, R_.ionLocksShields ? "IONIZED" : "SHIELD", "#9d8cff"); AUDIO.shield(them, w); return "blocked"; }
   // a laser (or any non-missile) on a raised shield pops one layer and does nothing else: no hull, no fire, no breach
-  if (w.type !== "missile" && w.type !== "ion" && them.layers > sp){ them.layers--; them.shieldHit = 1; float(them, rid, "SHIELD", "#5fd4e8"); AUDIO.sfx("shield"); return "blocked"; }
+  if (w.type !== "missile" && w.type !== "ion" && them.layers > sp){ them.layers--; them.shieldHit = 1; float(them, rid, "SHIELD", "#5fd4e8"); AUDIO.shield(them, w); return "blocked"; }
   return "through";
 }
 function land(p){
@@ -1672,7 +1729,7 @@ function land(p){
   if (!p.res) p.res = screen(p); // a shot that skipped the shield check (very short flight) settles now
   if (p.res !== "through") return;
   if (w.type === "ion"){
-    const s = them.sys[rid]; if (s) s.ion += R_.ionDuration*(w.ion || 1); float(them, rid, "IONIZED", "#9d8cff"); burst(them, rid, "#9d8cff", 10); return;
+    const s = them.sys[rid]; if (s) s.ion += R_.ionDuration*(w.ion || 1); float(them, rid, "IONIZED", "#9d8cff"); burst(them, rid, "#9d8cff", 10); AUDIO.sysDamage(them); return;
   }
   if (w.dmg > 0) hitRoom(them, rid, w.dmg, w);
   else { burst(them, rid, "#ffb347", 14); }
@@ -1696,7 +1753,7 @@ function hitRoom(ship, rid, dmg, w){
   if (ship.you) S.redFlash = Math.min(0.55, 0.25 + dmg*0.1);
   float(ship, rid, `-${dmg}`, "#ff6b4a");
   explode(ship, rid, dmg);
-  AUDIO.sfx("hit", Math.min(1, 0.5 + dmg*0.2));
+  AUDIO.hit(ship, dmg, w); if (s && dmg > 0) AUDIO.sysDamage(ship);
   clampPower(ship);
   if (!ship.you) autoPowerEnemy(ship);
   if (ship.boss && !ship.phase2done && ship.hull > 0 && ship.hull <= ship.maxHull*0.5){
@@ -1728,7 +1785,8 @@ function endFight(result, cause){
   S.endCause = cause;
   if (away) S.warp = 1;
   if (result === "surrendered" || result === "stalemate") for (const c of you.crew) if (c.hp > 0 && c.on === "foe"){ c.on = "you"; c.dest = c.room = room(you,"tele") ? "tele" : you.layout[0].id; c.gx = null; }
-  AUDIO.sfx(result === "dead" ? "death" : (away ? "jump" : result === "surrendered" ? "buy" : "boom"));
+  if (result === "dead") AUDIO.explosion(you, 7); else if (away) AUDIO.jump(); else if (result === "win") AUDIO.explosion(foe, 6); else AUDIO.ui("confirm");
+  if (result === "win" || result === "captured" || result === "surrendered") AUDIO.sting("win");
   setTimeout(() => afterFight(result), (calm ? 900 : 1700) + (STAGE.ok && result !== "fled" && result !== "stalemate" && result !== "surrendered" ? 800 : 0));
 }
 
@@ -2261,6 +2319,51 @@ function drawRooms(ship, dt){
     }
     if (S.selC !== null && S.you.crew[S.selC] && S.you.crew[S.selC].on === ship.key){ X.strokeStyle = "rgba(124,242,154,.25)"; roomLine(ship, r, q, 3); }
   }
+  drawDoorGaps(ship);
+}
+// a ship with no painted doors (a grid ship) shows an open door as a faint light gap in its wall, nothing for a sealed one;
+// the painted Kestrel's own door leaves slide open instead (kitDoorsDraw), so nothing is drawn over its painting
+function drawDoorGaps(ship){
+  if (!ship || ship.env || !ship.layout || !S || S.mode !== "fight") return;
+  const nav = shipNav(ship); if (nav.painted) return;
+  const g = G(ship), ls = doorLinks(ship);
+  for (const d of ls){ if (!(d.o > 0.3)) continue; const nd = nav.doors[d.i], p = doorPx(ship, nav, nd); if (!p) continue;
+    const L = g.cell*0.34, T = Math.max(2, g.cell*0.07); X.fillStyle = `rgba(180,225,255,${0.35*d.o})`;
+    if (nd.vert) X.fillRect(p.x - T/2, p.y - L/2, T, L); else X.fillRect(p.x - L/2, p.y - T/2, L, T); }
+}
+// where a door is on screen: a painted door's frame centre, else its wall point on the grid
+function doorPx(ship, nav, d){
+  const ca = cutArt(ship), sh = ca && ship.cut && SHAPED[ship.cut.art];
+  if (nav.painted){ const pd = sh && sh.doors && sh.doors[d.src]; if (!pd) return null; const [rx, ry, rw, rh] = pd.rect; return {x: ca.x + (rx + rw/2)*ca.s, y: ca.y + (ry + rh/2)*ca.s, w: rw*ca.s, h: rh*ca.s}; }
+  const p = crewPx({on: ship.key, gx: d.rect[0] + d.rect[2]/2, gy: d.rect[1] + d.rect[3]/2, _navKey: nav.key, _navRoom: d.a});
+  return p && !p.hidden ? {x: p.x, y: p.y, w: 0, h: 0} : null;
+}
+// the door on this ship under a point (stage px): its walk-graph index, or -1. The box is at least a fingertip across
+// (the painted frames are slim), and the nearest door wins
+function doorAt(ship, x, y){
+  if (!ship || ship.env || !ship.layout || !geo) return -1;
+  const nav = shipNav(ship), tap = Math.max(22, G(ship).cell*0.36); let best = -1, bd = Infinity;
+  nav.doors.forEach((d, i) => { const p = doorPx(ship, nav, d); if (!p) return; const hw = Math.max(p.w, tap)/2, hh = Math.max(p.h, tap)/2;
+    if (Math.abs(x - p.x) <= hw && Math.abs(y - p.y) <= hh){ const dd = Math.hypot(x - p.x, y - p.y); if (dd < bd){ bd = dd; best = i; } } });
+  return best;
+}
+const roomName = id => SYS_LABEL[id] || (id === "hall" ? "CORRIDOR" : String(id).toUpperCase());
+const DOORS_WRECKED = "The doors are wrecked: no door or airlock opens or shuts until someone repairs the DOORS room.";
+// FTL DR3: tap a door on your ship to hold it open, tap again to seal it
+function toggleDoor(i){
+  const you = S.you, d = shipNav(you).doors[i]; if (!d) return;
+  if (!doorsWork(you)){ setHint(DOORS_WRECKED); AUDIO.sfx("click"); return; }
+  const open = !doorHeld(you, i); doorSet(you, i, open); AUDIO.sfx("click");
+  setHint(`Door ${roomName(d.a)}–${roomName(d.b)} ${open ? "open: air, fire and boarders pass. Tap it to seal it." : "sealed: it holds air, fire and boarders. Your crew still pass."}`);
+  tickDeck();
+}
+// the DOOR row (or X): seal every door, or hold every inner door open. The airlocks stay shut: VENT opens those
+function actDoors(){
+  if (!S || S.mode !== "fight" || S.over) return;
+  if (!doorsWork(S.you)){ setHint(DOORS_WRECKED); AUDIO.sfx("click"); return; }
+  const open = !doorsAnyHeld(S.you); doorsAll(S.you, open); AUDIO.sfx("click");
+  setHint(open ? "All inner doors open: air evens out; fire and boarders pass. Airlocks stay shut (VENT). Tap DOOR to seal all." : "All doors sealed: they hold air, fire and boarders. Your crew still pass.");
+  tickDeck();
 }
 function drawDrones(ship){
   const g = G(ship);
@@ -2598,7 +2701,7 @@ function frame(now){
     const fightNow = S && S.mode === "fight";
     if (STAGE.ok){ STAGE.resize(W, H); const ts = fightNow ? STAGE.tilt() : 1; if (Math.abs(ts - TS) > 1e-4){ TS = ts; layout(); } }
     const cineNow = STAGE.ok && fightNow && STAGE.inCine();
-    if (fightNow && !S.paused && !S.over && !cineNow) for (let k = DIAG.ff ? 8 : 1; k > 0 && !S.over; k--) update(dt);   // #debug fast-forward runs the fight 8x
+    if (fightNow && !S.paused && !S.over && !cineNow) update(dt);
     X.setTransform(DPR,0,0,DPR,0,0); X.clearRect(0,0,W,H);
     if (!STAGE.ok) drawNebula();
     const warp = S && S.warp > 0 ? S.warp : 0;
@@ -2674,12 +2777,13 @@ cv.addEventListener("pointerdown", e => {
   if (S.ventArm){ const vr = roomAt(S.you, x, y); if (vr){ toggleVent(vr); return; } }
   const ci = S.you.crew.findIndex(c => c.hp > 0 && c.gx != null && !crewPx(c).hidden && (() => { const p = crewPx(c), hs = Math.max(16, G(S[c.on]).cell*0.5); return Math.hypot(p.x - x, p.y - hs*0.2 - y) < Math.max(12, hs*0.55); })());
   if (ci >= 0 && !S.boardArm){ S.selC = S.selC === ci ? null : ci; S.selW = null; buildDeck(); AUDIO.sfx("click"); if (S.selC !== null) setHint(`Tap a room to send ${S.you.crew[ci].name}.`); return; }
+  if (S.selC === null && S.selW === null && !S.boardArm && !(ins && ins.key === "you" && x >= ins.x && x <= ins.x + ins.w && y >= ins.y && y <= ins.y + ins.h)){ const di = doorAt(S.you, x, y); if (di >= 0){ toggleDoor(di); return; } } // a door on your ship: open or seal it
   const fr = S.foe.env ? null : roomAt(S.foe, x, y), yr = roomAt(S.you, x, y);
   // boarding: the tap that picks the room sends them, and the hint and button say so on that same tap (blind QA 2)
   if (S.boardArm && !S.foe.env){ const br = fr || roomNear(S.foe, x, y); if (br){ doBoard(br); return; } }
   if (fr && S.selW !== null){
     const w = S.you.weapons[S.selW];
-    if (w){ w.target = fr; setHint(`${w.name} → ${SYS_LABEL[fr] || fr.toUpperCase()}`); AUDIO.sfx("click"); }
+    if (w){ w.target = fr; setHint(`${w.name} → ${SYS_LABEL[fr] || fr.toUpperCase()}`); AUDIO.ui("target"); }
     S.selW = null; buildDeck(); return;
   }
   if (S.selC !== null){
@@ -2733,7 +2837,7 @@ function buildDeck(){
       if (drag.on){ const b = stageRect(cv), r = stageRect(el); S.dragW = {i, x0: r.left + r.width/2 - b.left, y0: (r.top + r.height/2 - b.top)/TS, x: sp.x - b.left, y: (sp.y - b.top)/TS}; } });
     el.addEventListener("pointerup", e => { clearTimeout(timer); const d = drag; drag = null; if (!d || !d.on) return; holdOff = true; S.dragW = null;
       const lp = localPt(e, cv), x = lp.x, y = lp.y/TS, fr = S.foe.env ? null : roomAt(S.foe, x, y);
-      if (fr){ w.target = fr; setHint(`${w.name} → ${SYS_LABEL[fr] || fr.toUpperCase()}`); AUDIO.sfx("click"); } S.selW = null; buildDeck(); });
+      if (fr){ w.target = fr; setHint(`${w.name} → ${SYS_LABEL[fr] || fr.toUpperCase()}`); AUDIO.ui("target"); } S.selW = null; buildDeck(); });
     el.addEventListener("pointerleave", () => clearTimeout(timer));
     el.addEventListener("click", () => { if (holdOff){ holdOff = false; return; } weaponTap(i); });
     el.addEventListener("contextmenu", e => e.preventDefault());
@@ -2747,8 +2851,13 @@ function buildDeck(){
     row.addEventListener("pointercancel", () => { y0 = null; });
     row.addEventListener("pointerup", e => { if (y0 === null) return; const dy = stagePt(e.clientX, e.clientY).y - y0; y0 = null; power(id, dy > 12 ? -1 : 1); }); });
   // the systems that take no reactor power, and the weapons system's own bars: shown so their damage shows, never tapped
-  const subs = ["pilot","sensors","doors","weapons"].filter(id => you.sys[id]);
-  if (subs.length) $("systems").insertAdjacentHTML("beforeend", `<div class="subsys" aria-label="Subsystems">${subs.map(id => `<div class="ss s-${id}" id="ss_${id}" data-s="${id}"><img src="${sysIcon(id)}" alt=""><span class="lbl">${SYS_SHORT[id]}</span><span id="sq_${id}"></span></div>`).join("")}</div>`);
+  // the DOOR row is also the door control (FTL's close all / open all): a tap seals every door or holds every inner door
+  // open. A ship with no doors system (basic doors) gets the row last, so nothing above it moves
+  const subs = ["pilot","sensors","doors","weapons"].filter(id => you.sys[id]); if (!you.sys.doors) subs.push("doors");
+  const ssRow = id => id === "doors" ? `<div class="ss s-doors" id="ss_doors" data-s="doors" role="button" aria-pressed="false" aria-label="Doors: tap to seal all or open all"><img src="${sysIcon(id)}" alt=""><span class="lbl" id="sl_doors">${SYS_SHORT[id]}</span><span id="sq_${id}"></span></div>`
+    : `<div class="ss s-${id}" id="ss_${id}" data-s="${id}"><img src="${sysIcon(id)}" alt=""><span class="lbl">${SYS_SHORT[id]}</span><span id="sq_${id}"></span></div>`;
+  if (subs.length) $("systems").insertAdjacentHTML("beforeend", `<div class="subsys" aria-label="Subsystems">${subs.map(ssRow).join("")}</div>`);
+  if ($("ss_doors")) $("ss_doors").addEventListener("click", actDoors);
   $("crew").innerHTML = you.crew.map((c,i) => `<button class="crewCard${S.selC === i ? " sel" : ""}${c.hp <= 0 ? " dead" : ""}" data-c="${i}" ${c.hp <= 0 ? "disabled" : ""}><img src="${portrait(c)}" alt=""><span class="cc"><b>${esc(c.name)}</b><small id="cs${i}"></small><span class="hpb"><i id="ch${i}"></i></span></span></button>`).join("");
   $("crew").querySelectorAll("button").forEach(b => b.addEventListener("click", () => { const i = +b.dataset.c; S.selC = S.selC === i ? null : i; S.selW = null; S.boardArm = false; buildDeck(); if (S.selC !== null) setHint(`Tap a room to send ${S.you.crew[i].name}.`); }));
   const acts = [];
@@ -2767,13 +2876,10 @@ function buildDeck(){
 // the old fixed edge ran the vent hint under BOARD)
 function fitHint(){ const h = $("hint"), ar = document.querySelector(".actRow"); if (!h || !ar) return;
   if (!document.body.classList.contains("land") || !S || S.mode !== "fight" || !ar.offsetWidth){ if (h.style.right) h.style.right = ""; return; }
-  // the hint ends left of the action buttons and, when there is one, left of the small ship's window and its name bar
-  // (a long briefing ran under the enemy's name, blind QA 2026-10-04)
-  const box = stageRect(h.offsetParent || cv), a = stageRect(ar), cvb = stageRect(cv), edge = Math.min(a.left, S.inset ? cvb.left + S.inset.x*cvb.width/W : Infinity),
-    r = Math.round(Math.max(8, box.left + box.width - edge + 8)) + "px"; if (h.style.right !== r) h.style.right = r; }
+  const box = stageRect(h.offsetParent || cv), a = stageRect(ar), r = Math.round(Math.max(8, box.left + box.width - a.left + 8)) + "px"; if (h.style.right !== r) h.style.right = r; }
 function tickDeck(){
   if (!S || S.mode !== "fight") return;
-  { const ar = document.querySelector(".actRow"), k = (ar ? ar.offsetWidth : 0) + "," + W + "," + (S.inset ? Math.round(S.inset.x) : ""); if (k !== fitHint.k){ fitHint.k = k; fitHint(); } }
+  { const ar = document.querySelector(".actRow"), k = (ar ? ar.offsetWidth : 0) + "," + W; if (k !== fitHint.k){ fitHint.k = k; fitHint(); } }
   const you = S.you;
   you.weapons.forEach((w,i) => {
     const el = $("w"+i); if (!el) return;
@@ -2790,6 +2896,7 @@ function tickDeck(){
     const on = id === "weapons" ? Math.min(weaponsDraw(you), cap(you, id)) : eff(you, id), h = pips(s.level, on, s.dmg, s.ion > 0);
     if (el.innerHTML !== h) el.innerHTML = h; const row = $("ss_"+id); row.classList.toggle("hurt", s.dmg > 0); row.classList.toggle("off", cap(you, id) <= 0); }
   for (const id of POWERED){ const el = $("sp_"+id); if (el){ const s = you.sys[id], h = pips(s.level, eff(you,id), s.dmg, s.ion > 0); if (el.innerHTML !== h) el.innerHTML = h; const row = $("sy_"+id); if (row){ row.classList.toggle("off", eff(you,id) <= 0); row.classList.toggle("hurt", s.dmg > 0); } } }
+  { const dr = $("ss_doors"); if (dr){ const held = doorsAnyHeld(you), t = held ? "OPEN" : SYS_SHORT.doors; dr.classList.toggle("held", held); if (dr.getAttribute("aria-pressed") !== String(held)) dr.setAttribute("aria-pressed", String(held)); setText($("sl_doors"), t); } }
   syncSensBtn();
   hudRes();
   const free = reactorFree(you);
@@ -2851,12 +2958,12 @@ function weaponTap(i){
 function power(id, d){
   const s = S.you.sys[id]; if (!s) return;
   if (d > 0){
-    if (s.power >= cap(S.you,id)){ if (s.dmg > 0 && s.power < s.level){ setHint(`${SYS_LABEL[id]} is damaged. Send crew to repair it.`); AUDIO.sfx("click"); } return; }
-    if (reactorFree(S.you) <= 0){ setHint("No free power. Swipe down on another system to free a bar."); AUDIO.sfx("click"); return; }
+    if (s.power >= cap(S.you,id)){ if (s.dmg > 0 && s.power < s.level){ setHint(`${SYS_LABEL[id]} is damaged. Send crew to repair it.`); AUDIO.ui("deny"); } return; }
+    if (reactorFree(S.you) <= 0){ setHint("No free power. Swipe down on another system to free a bar."); AUDIO.ui("deny"); return; }
     s.power++; }
   else { if (s.power <= 0) return; s.power--; }
   s.want = s.power;
-  AUDIO.sfx("click"); clampPower(S.you); tickDeck();
+  AUDIO.ui(d > 0 ? "power+" : "power-"); clampPower(S.you); tickDeck();
 }
 function togglePause(){ if (!S || S.mode !== "fight" || S.over) return; S.paused = !S.paused; if (!S.paused) setHint(""); AUDIO.sfx("click"); tickDeck(); }
 function actCloak(){
@@ -2888,7 +2995,7 @@ function actJump(){ if (!S || S.over || S.you.ftl < 1) return;
 function showOffer(f, t){
   const el = $("offer"); if (!el) return;
   const what = [`${t.scrap} scrap`].concat(t.fuel ? [`${t.fuel} fuel`] : []).concat(t.missiles ? [`${t.missiles} missile${t.missiles > 1 ? "s" : ""}`] : []).join(", ");
-  $("offerText").textContent = `The ${f.name} signals surrender. They offer ${what} if you let them go. ${f.flees ? "Fight on and they run: kill them before their drive spools (about 20 seconds) to take the wreck, or they get away with everything." : "Fight on and you can still take the wreck."}`;
+  $("offerText").textContent = `The ${f.name} signals surrender. They offer ${what} if you let them go. Fight on and you may take the wreck, or lose it if they run.`;
   el.hidden = false; S.wasPausedOffer = S.paused; S.paused = true; tickDeck();
 }
 function closeOffer(){ const el = $("offer"); if (el) el.hidden = true; }
@@ -4508,6 +4615,7 @@ function kitDoorsDraw(ship){
       X.fillStyle = "rgba(0,0,0,.25)"; X.fillRect(sx, sy, sw, shh);
       if (d.vert){ const hh = A.height/2; X.drawImage(A, 0, 0, A.width, hh, sx, sy - shh/2*o, sw, shh/2); X.drawImage(A, 0, hh, A.width, hh, sx, sy + shh/2 + shh/2*o, sw, shh/2); }
       else { const hw = A.width/2; X.drawImage(A, 0, 0, hw, A.height, sx - sw/2*o, sy, sw/2, shh); X.drawImage(A, hw, 0, hw, A.height, sx + sw/2 + sw/2*o, sy, sw/2, shh); }
+      if (navDoorHeldSrc(ship, sh.doors.indexOf(d))){ X.fillStyle = "rgba(255,176,80,.16)"; X.fillRect(sx, sy, sw, shh); } // held open by hand: a faint warm tint, no icon (CONVENTIONS 3)
       X.restore(); }
     return; }
   for (const d of sh.doors){
@@ -4728,13 +4836,30 @@ function navTarget(ship, c, nav){
 }
 // ---- doors: open ahead of whoever is about to walk through, shut a moment after the last has passed
 // hit: blows a boarder has landed on the door; brk: seconds a broken door still hangs open (FTL D2-D4, docs/COMBAT-RULES.md DR)
-function navDoors(ship, nav){ let st = NAV_DOORS.get(ship); if (!st || st.key !== nav.key){ const n = nav.doors.length; st = {key: nav.key, o: new Float32Array(n), hold: new Float32Array(n), want: new Uint8Array(n), hit: new Float32Array(n), brk: new Float32Array(n)}; NAV_DOORS.set(ship, st); } return st; }
+// held: the captain (or the enemy's AI) holds this door open (FTL DR3); otherwise it is sealed: shut, holding air, fire
+// and boarders, and opening only for its own crew as they walk through, then sealing behind them
+function navDoors(ship, nav){ let st = NAV_DOORS.get(ship); if (!st || st.key !== nav.key){ const n = nav.doors.length; st = {key: nav.key, o: new Float32Array(n), hold: new Float32Array(n), want: new Uint8Array(n), hit: new Float32Array(n), brk: new Float32Array(n), held: new Uint8Array(n)}; NAV_DOORS.set(ship, st); } return st; }
 function navDoorsTick(ship, dt){ if (!ship || !ship.layout || ship.env) return; const nav = shipNav(ship), st = navDoors(ship, nav);
-  for (let i = 0; i < st.o.length; i++){
+  for (let i = 0; i < st.o.length; i++){ const was = st.o[i] > 0;
     if (st.brk[i] > 0){ st.o[i] = 1; st.brk[i] -= dt; if (st.brk[i] <= 0){ st.brk[i] = 0; st.hit[i] = 0; } st.want[i] = 0; continue; } // broken: hangs open, then heals and shuts
-    if (st.want[i]){ st.o[i] = Math.min(1, st.o[i] + dt/0.15); st.hold[i] = 0.25; } else if (st.hold[i] > 0) st.hold[i] -= dt; else st.o[i] = Math.max(0, st.o[i] - dt/0.3); st.want[i] = 0; } }
+    if (st.want[i] || st.held[i]){ st.o[i] = Math.min(1, st.o[i] + dt/0.15); st.hold[i] = 0.25; } else if (st.hold[i] > 0) st.hold[i] -= dt; else st.o[i] = Math.max(0, st.o[i] - dt/0.3); st.want[i] = 0;
+    if (was !== st.o[i] > 0) AUDIO.door(ship, st.o[i] > 0); } } // the hiss of a door opening, the latch as it shuts (src/audio.js)
+// ---- the captain's door controls (FTL: click a door to open or close it; open all / close all). Airlocks are not
+// in this list: they open only by venting a room (VENT), so one tap never empties the whole ship (docs/COMBAT-RULES.md DR3)
+// can this ship's crew change its doors? Not while its doors system is wrecked or ionised (a ship with none has basic doors)
+function doorsWork(ship){ if (!ship || !ship.sys || ship.env) return false; const d = ship.sys.doors; return !d || (cap(ship, "doors") > 0 && !(d.ion > 0)); }
+function doorHeld(ship, i){ const nav = shipNav(ship), st = navDoors(ship, nav); return !!st.held[i]; }
+function doorSet(ship, i, open){ const nav = shipNav(ship), st = navDoors(ship, nav); if (i < 0 || i >= st.held.length) return false; st.held[i] = open ? 1 : 0; return true; }
+function doorsAnyHeld(ship){ if (!ship || ship.env || !ship.layout) return false; const st = navDoors(ship, shipNav(ship)); return st.held.some(Boolean); }
+function doorsAll(ship, open){ const st = navDoors(ship, shipNav(ship)); st.held.fill(open ? 1 : 0); }
+// FTL D6: doors reset (sealed, unbroken) at every new fight
+function doorsReset(ship){ if (!ship || ship.env || !ship.layout) return; const st = navDoors(ship, shipNav(ship)); st.held.fill(0); st.brk.fill(0); st.hit.fill(0); st.o.fill(0); st.hold.fill(0); }
+// every door with how far open it is now (0 shut .. 1 open): air and fire cross only these (updateOxygen, updateHazards)
+function doorLinks(ship){ if (!ship || ship.env || !ship.layout) return []; const nav = shipNav(ship), st = navDoors(ship, nav); return nav.doors.map((d, i) => ({a: d.a, b: d.b, o: st.o[i], i})); }
 // how far open a painted door is (by its index in the painting's door list), for the door drawing
 function navDoorOpen(ship, src){ const nav = shipNav(ship), st = NAV_DOORS.get(ship); if (!st || st.key !== nav.key) return 0; const i = nav.doors.findIndex(d => d.src === src); return i < 0 ? 0 : st.o[i]; }
+// is a painted door (by its index in the painting's door list) held open by the captain? (a faint tint marks it)
+function navDoorHeldSrc(ship, src){ const nav = shipNav(ship), st = NAV_DOORS.get(ship); if (!st || st.key !== nav.key) return false; const i = nav.doors.findIndex(d => d.src === src); return i >= 0 && !!st.held[i]; }
 // ---- one step along the way; returns how far they walked
 function crewPlace(ship, c, nav){ const t = navTarget(ship, c, nav); c.gx = t.x; c.gy = t.y; c._navRoom = t.room; c._navX = null; c._path = null; c._pt = null; c._navKey = nav.key; c.room = c.dest; c._foe = null; }
 function crewMove(ship, c, dt, speed){
@@ -4754,7 +4879,7 @@ function crewMove(ship, c, dt, speed){
     if (w.door != null && !(c._navX && c._navX.door === w.door)){ // at the door: it opens before they step in (a stuck door is forced after half a second)
       if (forcing && ds.o[w.door] < 0.6){ // a boarder at a shut door stands at its threshold and hits it about once a second until it breaks
         ds.hit[w.door] += dt*(MOD.rules.doorHitRate || 1)*SP(c).combat; c._doorHit = true; c.face = Math.atan2(w.y - c.gy, w.x - c.gx);
-        if (ds.hit[w.door] >= MOD.rules.doorHp*doorLevel(ship)){ ds.brk[w.door] = MOD.rules.doorBrokenTime || 7; ds.o[w.door] = 1; if (typeof float === "function") float(ship, c.room, "DOOR BROKEN", "#ff9b5c"); }
+        if (ds.hit[w.door] >= MOD.rules.doorHp*doorLevel(ship)){ ds.brk[w.door] = MOD.rules.doorBrokenTime || 7; ds.o[w.door] = 1; if (typeof float === "function") float(ship, c.room, "DOOR BROKEN", "#ff9b5c"); AUDIO.doorBreak(ship); }
         break; }
       if (ds.o[w.door] < 0.6 && (c._doorWait || 0) < 0.5){ c._doorWait = (c._doorWait || 0) + dt; break; } c._doorWait = 0; }
     if (w.door != null) c._navX = {door: w.door}; else if (w.hatch != null) c._navX = {hatch: w.hatch};
@@ -4801,7 +4926,7 @@ function sheet(html, keepScroll){ const p = $("panel"), sc0 = p.querySelector(":
 $("sheet").addEventListener("click", e => { if (e.target !== $("sheet")) return; const b = $("panel").querySelector("#back, #done, #logDone, #close"); if (b && !b.disabled) return b.click();
   if ($("leave")) nope("Tap LEAVE STORE to go."); });
 // a short line over the sheet for a tap that can't go through (no scrap, hull already whole)
-function nope(msg){ AUDIO.sfx("click"); let t = $("nope"); if (!t){ t = document.createElement("div"); t.id = "nope"; t.className = "nope"; t.setAttribute("role", "status"); $("sheet").appendChild(t); }
+function nope(msg){ AUDIO.ui("deny"); let t = $("nope"); if (!t){ t = document.createElement("div"); t.id = "nope"; t.className = "nope"; t.setAttribute("role", "status"); $("sheet").appendChild(t); }
   t.textContent = msg; t.classList.remove("on"); void t.offsetWidth; t.classList.add("on"); clearTimeout(nope.t); nope.t = setTimeout(() => t.classList.remove("on"), 1800); }
 function closeSheet(){ $("sheet").hidden = true; }
 function esc(s){ return String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
@@ -4883,7 +5008,7 @@ function buildMapDeck(){
   if (!n) card = `<b>SECTOR ${R.sector} OF ${SECTORS}${R.arc ? " · " + esc(R.arc.sectors[R.sector-1].name.toUpperCase()) : ""}</b><span>Tap a beacon to scan it. Every jump costs 1 fuel and lets ${esc(threatName())} close in. Reach the green EXIT beacon.${hunted ? " Your hull reads weak on their scopes: hunters will come looking." : ""}</span>`;
   else if (n.id === R.pos) card = `<b>YOU ARE HERE · ${esc(planetOf(n.seed).toUpperCase())}</b><span>${n.probed ? "You've already probed this world." : "Send a probe down and see what the world gives you. Free, and once per beacon."}</span>`;
   else if (n.col <= R.threat && n.type !== "flagship") card = `<b><span class="tag" style="color:#ff3d5a">OVERRUN</span>${esc(String(pursuer().name || threatName()).toUpperCase())}</b><span>${({fleet:"Its vanguard holds this beacon. A hard fight and nothing worth salvaging.", swarm:"The swarm has nested here. Expect a fight against something that doesn't need a crew.", nova:"The shockfront has burned through here. No enemy, just fire. You'd have to outlast it.", void:"The dark has taken this beacon. No enemy, just cold. You'd have to outlast it."})[pursuer().kind] || ""}</span>`;
-  else if (n.type === "hazard") card = `<b><span class="tag" style="color:#ffc857">HAZARD</span>${esc(({asteroids:"ASTEROID FIELD", flare:"SOLAR STORM", ion:"ION STORM"})[n.hz] || "HAZARD")}</b><span>Dangerous, and rich if you're willing to sit in it. You can pass it by. Near a ${esc(planetOf(n.seed))}.</span>`;
+  else if (n.type === "hazard") card = `<b><span class="tag" style="color:#ffc857">HAZARD</span>${esc(({asteroids:"ASTEROID FIELD", flare:"SOLAR STORM", ion:"ION STORM"})[n.hz] || "HAZARD")}</b><span>Dangerous, and rich if you're willing to sit in it. You can pass it by. ${esc(planetOf(n.seed))}.</span>`;
   else if (n.visited) card = `<b>VISITED</b><span>Empty space now. Jumping here still costs fuel and time.</span>`;
   else if (n.col <= R.threat + 1 && n.type !== "flagship" && n.type !== "exit" && reachable().includes(n.id)) card = `<b><span class="tag" style="color:#ff9b5c">PURSUIT</span>${esc(String(pursuer().name || threatName()).toUpperCase())} WILL BE HERE FIRST</b><span>Jump here and you meet the pursuit, not what the scanners show. Every jump lets it close in.</span>`;
   else if (n.type === "hostile"){ const s = scout(n); card = `<b><span class="tag" style="color:${s.danger[1]}">${s.danger[0]}</span>${esc(s.e.name)}</b><span>${sizeRule(s.e).label} ship · Hull ${s.e.hull} · ${(n_ => `${n_} shield layer${n_ === 1 ? "" : "s"}`)(Math.floor((s.e.sys.shields ? s.e.sys.shields.level : 0)/MOD.rules.powerPerLayer))} · ${s.e.weapons.map(w => w.name).join(", ")}${s.e.sys.cloak ? " · cloak" : ""}${s.e.sys.tele ? " · boarders" : ""}${s.e.sys.lock ? " · warp lock" : ""}${s.e.drones.length ? " · drones" : ""} · salvage ${s.loot}${s.e.notes.length ? "<br>Scouts: " + esc(s.e.notes.join(" ")) : ""}</span>`; }
@@ -5252,7 +5377,7 @@ function meets(req){
 function reqLabel(req){ if (!req) return ""; if (req.system) return SYS_LABEL[req.system]; if (req.crew) return (BONUS_LABEL[req.crew] || req.crew).toUpperCase(); if (req.scrap) return `${req.scrap} scrap`; if (req.missiles) return `${req.missiles} missiles`; return ""; }
 function runEvent(ev){
   R.curEvent = ev;
-  AUDIO.sfx("signal");
+  AUDIO.sfx("signal"); AUDIO.ui("text");
   const choices = ev.choices.map((c,i) => ({c, i})).filter(({c}) => !c.req || meets(c.req) || c.req.scrap || c.req.missiles);
   // the comms screen (concept 3): the transmission and the art side by side, then the decisions,
   // colour-coded: blue standard, red aggressive, gold needs a resource or a crew member
@@ -5303,6 +5428,7 @@ function outcomeSheet(title, text, chips, goods, next){
   sheet(`<h2>${esc(title)}</h2>${text ? `<div class="prose">${esc(text)}</div>` : ""}
     ${chips.length ? `<div class="chips">${chips.map((c,i) => `<span class="chip ${goods[i] === false ? "bad" : "good"}">${esc(c)}</span>`).join("")}</div>` : ""}
     <div class="btnRow"><button class="btn primary" id="cont">CONTINUE</button></div>`);
+  if (text) AUDIO.ui("text");
   $("cont").addEventListener("click", () => { AUDIO.sfx("click"); next(); });
 }
 function nextEvent(){
@@ -5338,6 +5464,7 @@ function wreckEvent(cap){
 
 /* ---------------- stores and upgrades ---------------- */
 function openStore(n){
+  AUDIO.sting("store");
   const r = rng32(n.seed + R.sector), you = R.you;
   if (!n.stock){
     // FTL prices: missiles 6 scrap each; hull 2 a point early, rising to 4 by the last sector
@@ -5407,7 +5534,7 @@ function openShip(back){
       const id = b.dataset.u; sellArm = null;
       if (id === "reactor"){ const c = upgradeCost("reactor", you.reactor); if (you.reactor >= 25) return nope("The reactor is at its maximum."); if (R.scrap < c) return nope(`Need ${c - R.scrap} more scrap.`); R.scrap -= c; you.reactor++; }
       else { const s = you.sys[id], c = upgradeCost(id, s.level); if (R.scrap < c) return nope(`Need ${c - R.scrap} more scrap.`); R.scrap -= c; s.level++; if (POWERED.includes(id) && reactorFree(you) > 0){ s.power++; s.want = s.power; } }
-      AUDIO.sfx("buy"); autoPowerWeapons(you); draw();
+      AUDIO.ui("upgrade"); autoPowerWeapons(you); draw();
     }));
     $("panel").querySelectorAll("[data-sell]").forEach(b => b.addEventListener("click", () => { const i = +b.dataset.sell;
       if (sellArm !== i){ sellArm = i; AUDIO.sfx("click"); return draw(); }
@@ -5457,7 +5584,7 @@ function sectorIntro(first){
       ${first ? `<div class="prose">${esc(arc.threat.what)}</div>` : ""}
       <div class="prose">${esc(fillNames(s.intro))}</div>
       <div class="btnRow"><button class="btn primary" id="cont">${first ? "LAUNCH" : "CONTINUE"}</button></div>`);
-    $("cont").addEventListener("click", () => { AUDIO.unlock(); AUDIO.sfx("click"); returnToMap(); showBanner(`SECTOR ${R.sector}`, s.name); requestPack(); });
+    $("cont").addEventListener("click", () => { AUDIO.unlock(); AUDIO.sfx("click"); returnToMap(); showBanner(`SECTOR ${R.sector}`, s.name); AUDIO.sting("sector"); requestPack(); });
   };
   if (first && sample){
     let done = false;
@@ -5486,7 +5613,7 @@ async function gameOver(won, cause){
     : `The ${you.name} went down in sector ${R.sector}. It was ${cause}, in the end.${S && S.endCause === "crew" ? " No one was left alive to fly her." : ""} ${R.kills} ship${R.kills === 1 ? "" : "s"} beaten on the way. ${R.lost.length ? `${R.lost.join(", ")} went first.` : ""}`;
   cap.epitaph = won ? "" : (you.crew[0] ? `${you.crew[0].name} here. If you find this, don't take the turn we took.` : "No one left to record.");
   lsSet("ftlr.run", null); saveUniverse();
-  AUDIO.setBattle(false); AUDIO.sfx(won ? "win" : "death");
+  AUDIO.setBattle(false); AUDIO.sting(won ? "win" : "loss");
   S = {mode:"map", parts:[], fx:[], floats:[], rings:[], zaps:[], warp:0}; setMode("over");
   $("banner").classList.remove("on");
   sheet(`<h3>${won ? "VICTORY" : "PERMADEATH"} · CAPTAIN №${R.n}</h3>
@@ -5662,6 +5789,7 @@ function showLog(){
     <p>Four sectors. One ship you rebuild as you go. Every voyage is built on the bones of one of the world's great epics, retold among the stars; you learn which at the end. ${sample ? "Claude writes it as you play." : "Stories from the ship's archive."} Death is permanent; your wreck is not.</p>
     ${lost.length ? `<h3>THE LINE SO FAR · ${UNI.runs} captain${UNI.runs === 1 ? "" : "s"}, ${UNI.wins || 0} victor${UNI.wins === 1 ? "y" : "ies"}</h3>
       <div class="hall">${lost.map(c => `<div><b>${esc(c.ship)}</b> · ${c.fate === "won" ? `broke ${esc(c.threat)}` : `lost in sector ${c.sector}${c.foe ? `, ${esc(c.foe)}` : ""}`}${epicById(c.epic) ? ` · <i>${esc(epicById(c.epic).title)}</i>` : ""}${c.epitaph ? `<br>“${esc(c.epitaph)}”` : ""}</div>`).join("")}</div>` : `<p class="dim">No captains in the log yet.</p>`}
+    <p class="dim">Music: "Drift", an original score written for FTL: Redux (exploration and battle versions). Sound effects: Kenney (kenney.nl) and rubberduck (OpenGameArt), all CC0, layered with the game's own synthesis.</p>
     <p class="dim">${coach.off ? `Fight tips are off. <button class="linkBtn" id="tipsOn">Turn them back on</button>` : "Short tips show up in your first fights, right when you need them."}</p>
     <div class="btnRow"><button class="btn primary" id="logDone">BACK</button></div>`);
   if ($("tipsOn")) $("tipsOn").addEventListener("click", () => { coach.off = false; coach.seen = []; coachSave(); showLog(); });
@@ -6481,6 +6609,8 @@ function pathGet(o, path){ return path.split(".").reduce((a, k) => a == null ? u
 function pathSet(o, path, v){ const ks = path.split("."), last = ks.pop(), parent = ks.reduce((a, k) => a == null ? undefined : a[k], o); if (parent && typeof parent === "object") parent[last] = v; }
 // keep every change the captain made: v4 -> v5 adds only what oxygen needs; v5 -> v6 swaps in the audited values
 function migrateMod(m){
+  // a saved v7 mod from before a rule was added: keep everything the captain set, take the new rules' defaults
+  if (m && m.version === 7 && m.rules && Object.keys(DEFAULT_MOD.rules).some(k => !(k in m.rules))){ try { m = clone(m); m.rules = {...DEFAULT_MOD.rules, ...m.rules}; } catch { return null; } return m; }
   if (!m || (m.version !== 4 && m.version !== 5 && m.version !== 6)) return m;
   if (m.version === 6) return migrate67(m);
   try {
@@ -6590,7 +6720,7 @@ $("aiBtn").addEventListener("click", () => { AUDIO.unlock(); openAI(); });
      mouse   click = tap; hover shows what a system, weapon, crew member or room is (and the hit chance on an
              enemy room with a weapon picked); right-click cancels a pick, or takes a bar of power off a
              system (and powers a weapon down) as in FTL; the wheel scrolls sheets and zooms the map
-     keys    Space pause · 1-4 weapons · A S D F G H K L systems (Shift lowers) · C cloak · B board · V vent
+     keys    Space pause · 1-4 weapons · A S D F G H K L systems (Shift lowers) · C cloak · B board · V vent · X doors
              J jump away · Tab swap the big ship · Esc close / cancel · Enter confirm · 1-9 answer an event
              · ? the key list
    Touch is untouched: everything here listens for a mouse or a key only.
@@ -6600,7 +6730,7 @@ const KEY_SYS = Object.fromEntries(Object.entries(SYS_KEYS).map(([id, k]) => [k,
 const SYS_WHAT = {shields: "Every 2 bars raise one shield layer. Each layer stops one laser shot.", engines: "Dodge chance and how fast the FTL drive spools.",
   medbay: "Heals crew standing in it.", oxygen: "Refills the air in every room.", cloak: "Cloak: +evasion and their guns can't lock on.",
   drones: "Powers your drones.", tele: "Charges the teleporter for boarding.", lock: "Holds the enemy's FTL drive.",
-  weapons: "Powers your weapons.", pilot: "Someone at the helm lets the ship dodge.", sensors: "See inside the enemy ship.", doors: "Doors hold boarders: 4 hits a level, one more level while manned. They slow fire."};
+  weapons: "Powers your weapons.", pilot: "Someone at the helm lets the ship dodge.", sensors: "See inside the enemy ship.", doors: "Sealed doors hold air, fire and boarders (4 hits a level, one more while manned). Your crew still pass."};
 const BTN_TIPS = {go: "Pause or resume the fight · Space", aVent: "Open airlocks: tap rooms to vent them · V", aJump: "Spool the FTL drive and jump away · J",
   aCloak: "Cloak · C", aBoard: "Send a boarding party · B", sensBtn: "Swap which ship is big · Tab", viewBtn: "Camera view", sndBtn: "Sound on or off",
   keysBtn: "Keyboard shortcuts · ?", shipBtn: "Upgrades and weapons", probeBtn: "Probe this world (once per beacon)", jumpBtn: "Jump to the picked beacon · Enter"};
@@ -6627,6 +6757,7 @@ function showKeys(){
       ${row(sys, "power to shields, engines, medbay, oxygen, teleporter, cloak, drones, warp lock")}
       ${row("Shift+A", "Shift with a system key takes a bar off")}
       ${row("C B V J", "cloak · board · vent · jump away")}
+      ${row("X", "seal all doors / open all doors (click a door on your ship to open or seal just that one)")}
       ${row("Tab", "swap which ship is big")}
       <h3>EVERYWHERE</h3>
       ${row("Esc", "close the sheet, or cancel what you picked")}
@@ -6703,6 +6834,7 @@ addEventListener("keydown", e => {
   if (K === "B"){ const w = whyOff("aBoard"); if (w) sayWhy(w); else actBoard(); return; }
   if (K === "J"){ const w = whyOff("aJump"); if (w) sayWhy(w); else actJump(); return; }
   if (K === "V"){ actVent(); return; }
+  if (K === "X"){ actDoors(); return; }
 });
 /* ---------- why a control does nothing ----------
    A greyed button (or its key) answers a tap with one short line in the hint, then the line clears itself. */
@@ -6763,7 +6895,9 @@ function sysTip(id){
 }
 // the pilot, sensors, doors and the weapons system's own bars: shown for their damage, never powered by hand
 function subTip(id){
-  const you = S.you, s = you.sys[id]; if (!s) return "";
+  const you = S.you, s = you.sys[id];
+  if (id === "doors"){ const held = doorsAnyHeld(you); return `<b>DOORS</b><span>${s ? `Level ${s.level}${s.dmg ? ` · ${s.dmg} damaged` : ""}${manned(you, "doors") ? " · manned" : ""}` : "Basic doors (level 1)"} · ${held ? "some held open" : "all sealed"}</span><span>${SYS_WHAT.doors}</span><i>click: ${held ? "seal all doors" : "open all doors"} · X · click a door on the ship for just that one</i>`; }
+  if (!s) return "";
   const c = cap(you, id);
   return `<b>${SYS_LABEL[id] || id.toUpperCase()}</b><span>Level ${s.level}${s.dmg ? ` · ${s.dmg} damaged` : ""}${s.ion > 0 ? " · ionized" : ""}${id === "weapons" ? ` · ${Math.min(weaponsDraw(you), c)} of ${c} in use` : ""}${manned(you, id) ? " · manned" : ""}</span><span>${SYS_WHAT[id] || ""}</span>`;
 }
@@ -6806,6 +6940,9 @@ function canvasTip(e){
   const fr = !S.foe.env && (!ship || ship === S.foe) ? roomAt(S.foe, x, y) : null, yr = !ship || ship === S.you ? roomAt(S.you, x, y) : null;
   cv.style.cursor = fr && S.selW !== null ? "crosshair" : (fr || yr) ? "pointer" : "";
   if (fr) return roomTip(S.foe, fr);
+  const di = (!ship || ship === S.you) && S.selC === null && S.selW === null && !S.boardArm ? doorAt(S.you, x, y) : -1;
+  if (di >= 0){ const d = shipNav(S.you).doors[di], held = doorHeld(S.you, di); cv.style.cursor = "pointer";
+    return `<b>DOOR · ${roomName(d.a)} | ${roomName(d.b)}</b><span>${held ? "held open: air, fire and boarders pass" : "sealed: holds air, fire and boarders; your crew still pass"}</span><i>click to ${held ? "seal it" : "hold it open"} · X for every door</i>`; }
   if (yr) return roomTip(S.you, yr);
   if (ship) return `<b>${ship.you ? "YOUR SHIP" : "ENEMY SHIP"}</b><i>click to make it the big one · Tab</i>`;
   return "";
@@ -6837,150 +6974,491 @@ addEventListener("pointerdown", e => { if (e.pointerType === "mouse") setTimeout
 document.addEventListener("pointerleave", hideTip);
 // live: the tooltip keeps up with the fight (charge, power, hit chance) while the mouse rests
 setInterval(() => { if (!TIP.hidden && tipAt && tipAt !== cv && S && S.mode === "fight"){ const r = tipAt.isConnected ? tipFor(tipAt) : ""; if (!r) hideTip(); else if (TIP.innerHTML !== r) TIP.innerHTML = r; } }, 250);
-
 /* ============================================================
-   SOUND — an adaptive score in the FTL manner: every sector has
-   one composition in two layers. The calm layer plays on the map;
-   the battle layer (drums, driving bass, lead) fades in over it
-   when a fight starts, on the same beat, so nothing cuts.
-   Real recorded tracks can replace it: fill TRACKS with the paths
-   of published audio files (explore + battle loops per sector).
+   SOUND — FTL: Redux's sound and music (src/audio.js)
+   Music: one composition in two arrangements, rendered from code (tools/audio/score.js):
+   a calm exploration loop and its battle version, sample-locked. Both play all the time; a fight
+   crossfades to the battle version and back, on the same beat, so it is one piece of music.
+   Stings (win, loss, new sector, store) quote the theme and duck the score while they play.
+   Effects: CC0 recordings (Kenney, rubberduck; docs/CREDITS.md) layered with WebAudio synthesis,
+   every play pitched, levelled and picked a little differently so repeats never sound robotic.
+   Files live in audio/ next to the page (artifact/audio). If they are missing (an old host),
+   the synth layers still play and a small built-in score stands in for the music.
+   The SOUND button cycles SOUND / SFX ONLY / MUTED. iOS: the context starts on the first tap.
    ============================================================ */
-const TRACKS = [ /* {explore:"music/s1-explore.mp3", battle:"music/s1-battle.mp3"}, ... one per sector */ ];
 const AUDIO = (() => {
-  let ctx = null, master, musicBus, sfxBus, explore, battle, rev, dly, noiseBuf, timer = null, step = 0, nextT = 0;
-  let battleOn = false, battleUntil = 0, boss = false, mode = 0, last = {};
-  let tracks = null, trackSector = -1, trackSrc = [];
+  const BASE = "audio/";
+  const SFX = ["laser1","laser2","laser3","crack1","crack2","heavy1","heavy2","cannon1","cannon2","rocket","ionbuzz",
+    "bang1","bang2","bang3","boom1","boom2","explo","clang1","clang2","clang3","debris","field","teleport","hiss","puff","latch",
+    "punch1","punch2","punch3","tool1","tool2","tool3","step1","step2","step3","tap","switch","confirm","deny","tick","coins"];
+  // the score: explore + battle loops (LOOP seconds, written with PAD seconds of lead-in and lead-out) and four stings
+  const MUSIC = {loop: 48*16*60/104/4, pad: 0.5, stems: ["explore", "battle"], stings: {win: 4.6, loss: 6.6, sector: 5.4, store: 3.6}};
+  let ctx = null, master, musicBus, sfxBus, loopBus, duck, stemGain = {}, stingBus, noiseBuf, crackleBuf, verb, timer = null;
+  let mode = 0, battleOn = false, boss = false, musicState = "none", stingT = 0, sfxReady = false;
+  const buf = {}, last = {}, prevPick = {};
+  let voices = 0, fb = null; // fb: the fallback score when the music files are not there
   try { mode = +(localStorage.getItem("ftlr.snd") || 0) || 0; } catch {}
-  const TEMPO = 96, SPB = 60/TEMPO/4;
-  const PROGS = [ [[57,0],[53,1],[48,1],[55,1]], [[50,0],[46,1],[53,1],[48,1]], [[52,0],[48,1],[50,1],[47,0]], [[53,0],[49,1],[56,1],[51,1]] ];
-  const LEADS = [
-    [[0,2,3],[3,1,1],[4,0,4],[10,1,2],[12,3,4]],
-    [[0,0,2],[2,1,2],[4,2,6],[12,1,2],[14,0,2]],
-    [[0,3,4],[4,2,2],[6,1,2],[8,2,6],[14,1,2]],
-    [[0,0,6],[6,1,2],[8,2,4],[12,3,2],[14,2,2]]
-  ];
-  const mtof = m => 440*Math.pow(2,(m-69)/12);
   const label = () => ["SOUND","SFX ONLY","MUTED"][mode];
+  const rr = (a, b) => a + Math.random()*(b - a);
+  const youPan = ship => ship && ship.you ? -0.22 : 0.22;
   function applyMode(){
     const b = document.getElementById("sndBtn"); if (b) b.textContent = label();
     if (!ctx) return;
-    musicBus.gain.setTargetAtTime(mode === 0 ? 0.5 : 0, ctx.currentTime, 0.1);
-    sfxBus.gain.setTargetAtTime(mode === 2 ? 0 : 0.55, ctx.currentTime, 0.05);
+    musicBus.gain.setTargetAtTime(mode === 0 ? 0.42 : 0, ctx.currentTime, 0.15);
+    sfxBus.gain.setTargetAtTime(mode === 2 ? 0 : 0.9, ctx.currentTime, 0.05);
+    if (mode === 0 && musicState === "none" && sfxReady) loadMusic(); // effects first, then the score
   }
+  /* ---------------- start-up (on the first tap) ---------------- */
   function unlock(){
-    if (ctx){ if (ctx.state === "suspended" && !document.hidden) ctx.resume(); return; }
-    try { ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch { ctx = null; return; }
-    master = ctx.createGain(); master.gain.value = 0.85;
-    const comp = ctx.createDynamicsCompressor(); comp.threshold.value = -14; comp.ratio.value = 4;
-    master.connect(comp); comp.connect(ctx.destination);
-    musicBus = ctx.createGain(); musicBus.gain.value = 0; musicBus.connect(master);
-    sfxBus = ctx.createGain(); sfxBus.gain.value = 0; sfxBus.connect(master);
-    explore = ctx.createGain(); explore.gain.value = 1; explore.connect(musicBus);
-    battle = ctx.createGain(); battle.gain.value = 0; battle.connect(musicBus);
-    const len = ctx.sampleRate*2.6, ir = ctx.createBuffer(2, len, ctx.sampleRate);
-    for (let c = 0; c < 2; c++){ const d = ir.getChannelData(c); for (let i = 0; i < len; i++) d[i] = (Math.random()*2-1)*Math.pow(1 - i/len, 2.4); }
-    rev = ctx.createConvolver(); rev.buffer = ir; const rg = ctx.createGain(); rg.gain.value = 0.32; rev.connect(rg); rg.connect(musicBus);
-    dly = ctx.createDelay(1); dly.delayTime.value = SPB*3; const fb = ctx.createGain(); fb.gain.value = 0.36; const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 2400;
-    dly.connect(lp); lp.connect(fb); fb.connect(dly); const dg = ctx.createGain(); dg.gain.value = 0.28; lp.connect(dg); dg.connect(musicBus);
-    noiseBuf = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate); const nd = noiseBuf.getChannelData(0); for (let i = 0; i < nd.length; i++) nd[i] = Math.random()*2-1;
-    applyMode();
-    nextT = ctx.currentTime + 0.12;
-    timer = setInterval(sched, 25);
-    if (TRACKS.length) loadTracks();
+    try {
+      if (ctx){ if (ctx.state !== "running" && !document.hidden) ctx.resume(); return; }
+      const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+      try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch {} // iOS: the game's own SOUND setting rules, not the ring switch
+      ctx = new AC({latencyHint: "interactive"});
+      build(ctx, ctx.destination);
+      applyMode();
+      loadSfx().then(() => { sfxReady = true; applyMode(); });
+      timer = setInterval(tick, 50);
+    } catch { ctx = null; }
   }
-  function tone(type, f, t, dur, dest, vol, o = {}){
+  function build(c, dest){
+    // master: a gentle low cut (phone speakers waste headroom below ~50 Hz), glue compression, then a brick-wall-ish limiter
+    const hp = c.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 45; hp.Q.value = 0.5;
+    const glue = c.createDynamicsCompressor(); glue.threshold.value = -16; glue.knee.value = 10; glue.ratio.value = 3; glue.attack.value = 0.004; glue.release.value = 0.18;
+    const lim = c.createDynamicsCompressor(); lim.threshold.value = -3; lim.knee.value = 0; lim.ratio.value = 20; lim.attack.value = 0.001; lim.release.value = 0.08;
+    master = c.createGain(); master.gain.value = 0.9; master.connect(hp); hp.connect(glue); glue.connect(lim); lim.connect(dest);
+    musicBus = c.createGain(); musicBus.gain.value = 0; musicBus.connect(master);
+    duck = c.createGain(); duck.connect(musicBus);
+    for (const k of MUSIC.stems){ stemGain[k] = c.createGain(); stemGain[k].gain.value = 0; stemGain[k].connect(duck); }
+    stingBus = c.createGain(); stingBus.gain.value = 0.9; stingBus.connect(musicBus);
+    sfxBus = c.createGain(); sfxBus.gain.value = 0; sfxBus.connect(master);
+    loopBus = c.createGain(); loopBus.gain.value = 1; loopBus.connect(sfxBus);
+    noiseBuf = c.createBuffer(1, c.sampleRate*2, c.sampleRate); const nd = noiseBuf.getChannelData(0); for (let i = 0; i < nd.length; i++) nd[i] = Math.random()*2 - 1;
+    // a short dark room for the effects (shield thooms, explosions), so they bloom instead of stopping dead
+    const len = Math.floor(c.sampleRate*1.3), ir = c.createBuffer(2, len, c.sampleRate);
+    for (let ch = 0; ch < 2; ch++){ const d = ir.getChannelData(ch); let lp = 0; for (let i = 0; i < len; i++){ lp += (Math.random()*2 - 1 - lp)*0.35; d[i] = lp*Math.pow(1 - i/len, 3); } }
+    const conv = c.createConvolver(); conv.buffer = ir; const vg = c.createGain(); vg.gain.value = 0.5; conv.connect(vg); vg.connect(sfxBus);
+    verb = c.createGain(); verb.connect(conv);
+    crackleBuf = makeCrackle(c);
+    loops.fire = loopNode(c, crackleBuf, 0); loops.air = airLoop(c);
+  }
+  // fire: a 3 s seamless loop of crackles (random pops, a few big snaps) over a low roar, made once at start-up
+  function makeCrackle(c){
+    const sr = c.sampleRate, n = sr*3, b = c.createBuffer(2, n, sr);
+    for (let ch = 0; ch < 2; ch++){ const d = b.getChannelData(ch); let lp = 0, lp2 = 0;
+      for (let i = 0; i < n; i++){ lp += (Math.random()*2 - 1 - lp)*0.02; lp2 += (lp - lp2)*0.05; d[i] = lp2*3.2*(0.75 + 0.25*Math.sin(i/sr*2*Math.PI*(1 + ch*0.33))); }
+      const pops = 120 + Math.floor(Math.random()*30);
+      for (let k = 0; k < pops; k++){ const at = Math.floor(Math.random()*n), amp = Math.pow(Math.random(), 3)*0.9 + 0.05, l = Math.floor(sr*(0.0015 + Math.random()*0.006)), f = 0.2 + Math.random()*0.6;
+        let y = 0; for (let j = 0; j < l; j++){ y += ((Math.random()*2 - 1) - y)*f; d[(at + j) % n] += y*amp*Math.pow(1 - j/l, 2); } } }
+    return b;
+  }
+  const loops = {};
+  function loopNode(c, b, gain){ const s = c.createBufferSource(); s.buffer = b; s.loop = true; const bp = c.createBiquadFilter(); bp.type = "highpass"; bp.frequency.value = 120;
+    const g = c.createGain(); g.gain.value = gain; s.connect(bp); bp.connect(g); g.connect(loopBus); s.start(); return {g, lvl: 0}; }
+  function airLoop(c){ // a breach: air rushing out, a band of noise that wanders
+    const s = c.createBufferSource(); s.buffer = noiseBuf; s.loop = true; const bp = c.createBiquadFilter(); bp.type = "bandpass"; bp.frequency.value = 2600; bp.Q.value = 0.6;
+    const lfo = c.createOscillator(), lg = c.createGain(); lfo.frequency.value = 0.37; lg.gain.value = 900; lfo.connect(lg); lg.connect(bp.frequency); lfo.start();
+    const g = c.createGain(); g.gain.value = 0; s.connect(bp); bp.connect(g); g.connect(loopBus); s.start(); return {g, lvl: 0}; }
+  /* ---------------- samples ---------------- */
+  async function decode(c, url){
+    const r = await fetch(BASE + url); if (!r.ok) throw new Error(url);
+    const ab = await r.arrayBuffer();
+    return await new Promise((ok, no) => { const p = c.decodeAudioData(ab, ok, no); if (p && p.then) p.then(ok, no); });
+  }
+  function lead(b){ // where the sound starts (an mp3 decoder may leave its priming silence in front)
+    const d = b.getChannelData(0), lim = Math.min(d.length, Math.floor(b.sampleRate*0.08)); for (let i = 0; i < lim; i++) if (Math.abs(d[i]) > 0.003) return i/b.sampleRate; return 0; }
+  // four at a time (a phone decodes these on its main thread), weapons and interface first
+  async function loadSfx(c = ctx){
+    const q = SFX.slice(), run = async () => { while (q.length){ const n = q.shift(); try { const b = await decode(c, `sfx/${n}.mp3`); buf[n] = {b, off: lead(b)}; } catch {} } };
+    await Promise.all([run(), run(), run(), run()]);
+  }
+  /* ---------------- music ---------------- */
+  async function loadMusic(){
+    if (!ctx || musicState !== "none") return; musicState = "loading";
+    try {
+      const [ex, ba] = await Promise.all(MUSIC.stems.map(k => decode(ctx, `music/${k}.mp3`)));
+      buf.explore = {b: ex}; buf.battle = {b: ba};
+      const at = ctx.currentTime + 0.15;
+      for (const [k, b] of [["explore", ex], ["battle", ba]]){
+        const s = ctx.createBufferSource(); s.buffer = b; s.loop = true; s.loopStart = MUSIC.pad; s.loopEnd = MUSIC.pad + MUSIC.loop;
+        s.connect(stemGain[k]); s.start(at, MUSIC.pad);
+      }
+      musicState = "ready";
+      stemGain.explore.gain.setValueAtTime(0, at); stemGain.battle.gain.setValueAtTime(0, at);
+      setBattle(battleOn, boss, 2.5);
+      for (const k of Object.keys(MUSIC.stings)) decode(ctx, `music/sting-${k}.mp3`).then(b => { buf["sting-" + k] = {b}; }).catch(() => {});
+    } catch { musicState = "failed"; fb = fallbackScore(); }
+  }
+  // explore <-> battle: the battle version comes in fast (a fight starts NOW), and lets go slowly after it
+  function setBattle(on, isBoss, fadeIn){
+    battleOn = !!on; boss = !!isBoss;
+    if (!ctx) return;
+    const t = ctx.currentTime;
+    if (musicState === "ready"){
+      const e = stemGain.explore.gain, b = stemGain.battle.gain;
+      e.cancelScheduledValues(t); b.cancelScheduledValues(t); e.setValueAtTime(e.value, t); b.setValueAtTime(b.value, t);
+      if (fadeIn){ (on ? b : e).setTargetAtTime(1, t, fadeIn/3); return; }
+      if (on){ b.setTargetAtTime(1, t, 0.3); e.setTargetAtTime(0, t + 0.25, 0.45); }
+      else { e.setTargetAtTime(1, t + 0.4, 0.9); b.setTargetAtTime(0, t + 0.6, 1.2); }
+    }
+    if (fb) fb.battle(on, t);
+  }
+  function sting(kind){
+    if (!ctx || mode !== 0) return;
+    const s = buf["sting-" + kind], t = ctx.currentTime, len = MUSIC.stings[kind] || 4;
+    const d = duck.gain; d.cancelScheduledValues(t); d.setValueAtTime(d.value, t);
+    if (kind === "loss"){ d.setTargetAtTime(0, t, 0.25); d.setTargetAtTime(1, t + len + 1, 2.5); }
+    else { d.setTargetAtTime(kind === "store" ? 0.55 : 0.28, t, 0.08); d.setTargetAtTime(1, t + len*0.7, 1.2); }
+    stingT = t + len;
+    if (!s) return;
+    const src = ctx.createBufferSource(); src.buffer = s.b; src.connect(stingBus); src.start(t + 0.02);
+  }
+  /* ---------------- the voice helpers ---------------- */
+  // one sample, with its own pitch, level, filter and place in the stereo field
+  function play(name, t, o = {}){
+    const e = buf[name]; if (!e || !ctx) return null;
+    if (voices > 40 && !o.must) return null;
+    const s = ctx.createBufferSource(); s.buffer = e.b; s.playbackRate.value = (o.rate || 1)*(o.jit === 0 ? 1 : rr(0.96, 1.04));
+    let n = s;
+    if (o.lp){ const f = ctx.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = o.lp; f.Q.value = o.q || 0.7; n.connect(f); n = f; }
+    if (o.hp){ const f = ctx.createBiquadFilter(); f.type = "highpass"; f.frequency.value = o.hp; n.connect(f); n = f; }
+    const g = ctx.createGain(); g.gain.value = (o.gain ?? 1)*rr(0.88, 1.06); n.connect(g);
+    if (o.fade){ g.gain.setValueAtTime(g.gain.value, t + o.fade[0]); g.gain.linearRampToValueAtTime(0, t + o.fade[0] + o.fade[1]); }
+    out(g, o);
+    voices++; s.onended = () => { voices--; };
+    s.start(t, (e.off || 0) + (o.at || 0), o.dur); return s;
+  }
+  function out(g, o){
+    let n = g;
+    if (o.pan && ctx.createStereoPanner){ const p = ctx.createStereoPanner(); p.pan.value = Math.max(-1, Math.min(1, o.pan)); g.connect(p); n = p; }
+    n.connect(o.dest || sfxBus);
+    if (o.verb){ const v = ctx.createGain(); v.gain.value = o.verb; n.connect(v); v.connect(verb); }
+  }
+  // pick one of several takes, never the same one twice running
+  function pick(...names){ const key = names[0]; let i = Math.floor(Math.random()*names.length); if (names.length > 1 && i === prevPick[key]) i = (i + 1) % names.length; prevPick[key] = i; return names[i]; }
+  function tone(type, f, t, dur, vol, o = {}){
+    if (voices > 44 && !o.must) return;
     const osc = ctx.createOscillator(); osc.type = type; osc.frequency.setValueAtTime(f, t);
     if (o.to) osc.frequency.exponentialRampToValueAtTime(Math.max(20, o.to), t + (o.glide || dur));
     if (o.detune) osc.detune.value = o.detune;
-    const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(vol, t + (o.a || 0.005)); g.gain.setTargetAtTime(0.0001, t + dur, (o.r || 0.08)/3);
     let n = osc;
-    if (o.lp){ const f2 = ctx.createBiquadFilter(); f2.type = o.hp ? "highpass" : "lowpass"; f2.Q.value = o.q || 0.8; f2.frequency.setValueAtTime(o.env || o.lp, t); if (o.env) f2.frequency.exponentialRampToValueAtTime(o.lp, t + (o.decay || 0.2)); osc.connect(f2); n = f2; }
-    if (o.vib){ const l = ctx.createOscillator(), lg = ctx.createGain(); l.frequency.value = 5.5; lg.gain.value = f*0.006; l.connect(lg); lg.connect(osc.frequency); l.start(t); l.stop(t + dur + 0.3); }
-    n.connect(g); g.connect(dest); if (o.send){ g.connect(dly); g.connect(rev); } if (o.rev) g.connect(rev);
-    osc.start(t); osc.stop(t + dur + (o.r || 0.08) + 0.1);
+    if (o.lp){ const f2 = ctx.createBiquadFilter(); f2.type = "lowpass"; f2.Q.value = o.q || 0.8; f2.frequency.setValueAtTime(o.lp, t); if (o.lpTo) f2.frequency.exponentialRampToValueAtTime(o.lpTo, t + dur); osc.connect(f2); n = f2; }
+    if (o.fm){ const m = ctx.createOscillator(), mg = ctx.createGain(); m.frequency.value = f*o.fm[0]; mg.gain.setValueAtTime(f*o.fm[1], t); mg.gain.setTargetAtTime(f*(o.fm[2] || 0), t, o.fm[3] || 0.1); m.connect(mg); mg.connect(osc.frequency); m.start(t); m.stop(t + dur + (o.r || 0.08) + 0.2); }
+    const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(vol, t + (o.a || 0.004));
+    if (o.decay) g.gain.setTargetAtTime(0.0001, t + (o.a || 0.004), o.decay/3); else g.gain.setTargetAtTime(0.0001, t + dur, (o.r || 0.08)/3);
+    n.connect(g); out(g, o);
+    voices++; osc.onended = () => { voices--; };
+    osc.start(t); osc.stop(t + dur + (o.r || 0.08) + 0.15);
   }
-  function noise(t, dur, dest, vol, o = {}){
+  function noise(t, dur, vol, o = {}){
+    if (voices > 44 && !o.must) return;
     const s = ctx.createBufferSource(); s.buffer = noiseBuf; s.loop = true;
     const f = ctx.createBiquadFilter(); f.type = o.type || "lowpass"; f.frequency.setValueAtTime(o.f || 1000, t); f.Q.value = o.q || 0.8;
-    if (o.to) f.frequency.exponentialRampToValueAtTime(o.to, t + dur);
-    const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(vol, t + (o.a || 0.003)); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    s.connect(f); f.connect(g); g.connect(dest); s.start(t, Math.random()*0.5); s.stop(t + dur + 0.05);
+    if (o.to) f.frequency.exponentialRampToValueAtTime(o.to, t + (o.glide || dur));
+    const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(vol, t + (o.a || 0.003));
+    if (o.hold) g.gain.setValueAtTime(vol, t + o.hold);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    s.connect(f); f.connect(g); out(g, o);
+    voices++; s.onended = () => { voices--; };
+    s.start(t, Math.random()*1.5); s.stop(t + dur + 0.05);
   }
-  function sched(){
-    if (!ctx || ctx.state !== "running") return;
-    while (nextT < ctx.currentTime + 0.15){ if (!tracks) playStep(step, nextT); step = (step + 1) % 64; nextT += SPB*(boss ? 0.92 : 1); }
-  }
-  function playStep(st, t){
-    if (mode !== 0) return;
-    const sec = R ? (R.sector - 1) % 4 : 0, [root, maj] = PROGS[sec][Math.floor(st/16)], s = st % 16;
-    const tn = [root, root + (maj ? 4 : 3), root + 7, root + 12];
-    if (s === 0){ for (const n of tn.slice(0,3)){ tone("sawtooth", mtof(n+12), t, SPB*15, explore, 0.022, {a:1.1, r:1.4, detune:-7, lp:900, rev:true}); tone("sawtooth", mtof(n+12), t, SPB*15, explore, 0.022, {a:1.1, r:1.4, detune:7, lp:900}); }
-      tone("sine", mtof(root-12), t, SPB*15, explore, 0.13, {a:0.08, r:0.6}); }
-    if (s % 2 === 0){ const pat = [0,1,2,1,2,3,2,1]; tone("triangle", mtof(tn[pat[(s/2) % 8]] + 12), t, SPB*1.4, explore, 0.05, {r:0.3, send:true}); }
-    if (s === 12 && Math.floor(st/16) % 2 === 1) tone("sine", mtof(tn[2] + 24), t, SPB*6, explore, 0.03, {r:1.2, send:true});
-    const audible = battleOn || (ctx.currentTime < battleUntil);
-    if (!audible) return;
-    if (s === 0 || s === 8 || (boss && (s === 6 || s === 14)) || (s === 11 && Math.floor(st/16) % 2)){ tone("sine", 150, t, 0.22, battle, 0.5, {to:42, glide:0.14, r:0.1}); }
-    if (s === 4 || s === 12){ noise(t, 0.16, battle, 0.22, {type:"bandpass", f:1900, q:0.7}); tone("triangle", 190, t, 0.06, battle, 0.12, {to:120}); }
-    if (s % 2 === 0) noise(t, s === 14 ? 0.18 : 0.04, battle, s % 4 === 2 ? 0.07 : 0.04, {type:"highpass", f:7000});
-    if ([0,2,3,6,8,10,11,14].includes(s)) tone("sawtooth", mtof((s % 4 === 0 ? root - 24 : root - 12)), t, SPB*1.5, battle, 0.12, {lp:260, env:1800, decay:0.14, r:0.05});
-    const bar = Math.floor(st/16);
-    for (const [at, deg, len] of LEADS[sec]) if (at === s) tone("square", mtof(tn[deg] + 12 + (bar === 3 && deg === 0 ? 2 : 0)), t, SPB*len*0.95, battle, 0.045, {lp:2800, vib:true, send:true, r:0.12});
-  }
-  function setBattle(on, isBoss){
-    battleOn = on; boss = !!isBoss;
-    if (!ctx) return;
-    const now = ctx.currentTime;
-    battle.gain.setTargetAtTime(on ? 1 : 0, now, on ? 0.45 : 1.3);
-    explore.gain.setTargetAtTime(on ? 0.5 : 1, now, 0.8);
-    if (!on) battleUntil = now + 6;
-    if (tracks) switchTracks();
-  }
-  async function loadTracks(){
-    try {
-      tracks = await Promise.all(TRACKS.map(async s => ({explore: await ctx.decodeAudioData(await (await fetch(s.explore)).arrayBuffer()), battle: await ctx.decodeAudioData(await (await fetch(s.battle)).arrayBuffer())})));
-      switchTracks();
-    } catch { tracks = null; }
-  }
-  function switchTracks(){
-    const sec = R ? (R.sector - 1) % tracks.length : 0;
-    if (sec === trackSector) return; trackSector = sec;
-    for (const s of trackSrc) try { s.stop(ctx.currentTime + 1.5); } catch {}
-    const at = ctx.currentTime + 0.05;
-    trackSrc = ["explore","battle"].map(k => { const s = ctx.createBufferSource(); s.buffer = tracks[sec][k]; s.loop = true; s.connect(k === "explore" ? explore : battle); s.start(at); return s; });
-  }
-  function sfx(name, vol = 1){
-    if (!ctx || mode === 2 || ctx.state !== "running") return;
-    const t = ctx.currentTime, d = sfxBus;
-    if (last[name] && t - last[name] < 0.045) return; last[name] = t;
-    switch (name){
-      case "laser": tone("square", 1300, t, 0.1, d, 0.1*vol, {to:280, glide:0.12, lp:3000}); break;
-      case "missile": noise(t, 0.55, d, 0.16*vol, {type:"bandpass", f:380, to:1600, q:1.2}); tone("sawtooth", 90, t, 0.3, d, 0.08*vol, {lp:400}); break;
-      case "beam": tone("sawtooth", 220, t, 0.55, d, 0.07*vol, {lp:1400, vib:true, r:0.2}); tone("sine", 440, t, 0.55, d, 0.05*vol, {r:0.2}); break;
-      case "ion": tone("triangle", 500, t, 0.1, d, 0.09*vol, {to:1500, glide:0.1}); tone("triangle", 1500, t + 0.1, 0.18, d, 0.07*vol, {to:250}); break;
-      case "shield": tone("sine", 1500, t, 0.12, d, 0.08*vol, {to:900, r:0.2}); noise(t, 0.1, d, 0.05*vol, {type:"highpass", f:4000}); break;
-      case "hit": noise(t, 0.4, d, 0.32*vol, {f:1000, to:200}); tone("sine", 80, t, 0.22, d, 0.3*vol, {to:40}); break;
-      case "boom": noise(t, 1.3, d, 0.45, {f:700, to:80}); tone("sine", 55, t, 0.8, d, 0.4, {to:28, r:0.4}); break;
-      case "death": noise(t, 2.2, d, 0.45, {f:500, to:60}); tone("sawtooth", 70, t, 1.6, d, 0.12, {to:30, lp:300}); break;
-      case "zap": tone("square", 2100, t, 0.05, d, 0.05*vol, {to:800}); break;
-      case "click": tone("sine", 1800, t, 0.02, d, 0.035, {r:0.02}); break;
-      case "buy": tone("sine", 880, t, 0.07, d, 0.06); tone("sine", 1320, t + 0.08, 0.1, d, 0.06); break;
-      case "jump": tone("sawtooth", 70, t, 0.8, d, 0.1, {to:1400, glide:0.8, lp:3000, env:200, decay:0.8, r:0.3}); noise(t, 0.9, d, 0.12, {type:"bandpass", f:300, to:5000}); break;
-      case "teleport": tone("sine", 300, t, 0.45, d, 0.08, {to:1800, glide:0.45, vib:true, r:0.2}); break;
-      case "cloak": noise(t, 0.6, d, 0.09, {type:"bandpass", f:3000, to:400, q:2}); tone("sine", 220, t, 0.5, d, 0.06, {to:80}); break;
-      case "alarm": for (let i = 0; i < 4; i++) tone("square", i % 2 ? 520 : 660, t + i*0.18, 0.15, d, 0.05, {lp:2000}); break;
-      case "signal": tone("sine", 1046, t, 0.1, d, 0.05); tone("sine", 1318, t + 0.14, 0.16, d, 0.05); break;
-      case "win": [523,659,784,1046].forEach((f,i) => tone("triangle", f, t + i*0.13, 0.3, d, 0.07, {r:0.4})); break;
+  // a body: the low sine "thump" that gives a hit its weight (with a harmonic so a phone speaker still hears it)
+  function thump(t, f0, f1, dur, vol, o = {}){ tone("sine", f0, t, dur, vol, {to: f1, glide: dur*0.7, decay: dur, ...o}); tone("triangle", f0*2, t, dur*0.6, vol*0.35, {to: f1*2, glide: dur*0.5, decay: dur*0.5, ...o}); }
+  const ok = (name, gap = 0.04) => { if (!ctx || mode === 2 || ctx.state !== "running") return false; const t = ctx.currentTime; if (last[name] && t - last[name] < gap) return false; last[name] = t; return true; };
+  /* ---------------- weapons ---------------- */
+  function weapon(w, me){
+    if (!w || !ok("w:" + (w.id || w.type), 0.05)) return;
+    const t = ctx.currentTime + 0.005, pan = youPan(me), far = me && !me.you, g = far ? 0.72 : 1, lp = far ? 6500 : 0;
+    const shots = Math.max(1, Math.min(7, w.shots || 1));
+    if (w.type === "beam") return beam(t, pan, g, w);
+    if (w.type === "ion") return ion(t, pan, g, lp);
+    if (w.type === "missile"){
+      if (w.bomb){ play("teleport", t, {rate: rr(1.25, 1.4), gain: 0.5*g, pan, dur: 0.6, fade: [0.35, 0.2], verb: 0.3}); thump(t, 160, 60, 0.25, 0.3*g, {pan}); noise(t, 0.35, 0.08*g, {type: "bandpass", f: 900, to: 3000, q: 2, pan}); return; }
+      for (let i = 0; i < shots; i++){ const ti = t + i*0.12;
+        play(pick("clang2", "clang1"), ti, {rate: rr(0.55, 0.65), gain: 0.35*g, pan, dur: 0.18, fade: [0.08, 0.1], lp: 2500});      // the launcher's clunk
+        thump(ti, 120, 42, 0.22, 0.42*g, {pan});
+        play("rocket", ti + 0.02, {rate: rr(0.92, 1.08), gain: 0.62*g, pan, hp: 180, lp: lp || 9000});                           // the motor
+        noise(ti, 0.5, 0.1*g, {type: "bandpass", f: 500, to: 2600, q: 1.1, pan, glide: 0.4}); }                                   // its whoosh
+      return;
+    }
+    // lasers: a chirp, a real crack on the front and a low body; burst lasers fire their shots 0.12 s apart, flak in one ragged volley
+    if (w.flak){
+      for (let i = 0; i < Math.min(shots, 4); i++){ const ti = t + i*0.045 + rr(0, 0.02);
+        play(pick("cannon1", "cannon2"), ti, {rate: rr(1.05, 1.35), gain: (i ? 0.38 : 0.6)*g, pan: pan + rr(-0.1, 0.1), dur: 0.5, fade: [0.25, 0.2], lp: lp || 12000}); }
+      thump(t, 150, 50, 0.2, 0.45*g, {pan}); play("crack1", t, {rate: rr(0.7, 0.8), gain: 0.4*g, pan, hp: 600});
+      return;
+    }
+    const heavy = (w.dmg || 1) >= 2, rise = w.chain ? 1 + 0.05*(w.stack || 0) : 1;
+    for (let i = 0; i < shots; i++){ const ti = t + i*0.12, br = shots > 1 ? 1.06 + i*0.025 : 1;
+      if (heavy){
+        play(pick("heavy1", "heavy2"), ti, {rate: rr(0.8, 0.9), gain: 0.55*g, pan, lp: lp || 12000});
+        play(pick("crack1", "crack2"), ti, {rate: rr(0.62, 0.72), gain: 0.55*g, pan, hp: 300});
+        thump(ti, 170, 45, 0.2, 0.5*g, {pan});
+        noise(ti, 0.18, 0.12*g, {type: "lowpass", f: 3000, to: 300, pan});
+      } else {
+        play(pick("laser1", "laser2", "laser3"), ti, {rate: rr(0.94, 1.06)*br*rise, gain: 0.5*g, pan, lp: lp || 14000});
+        play(pick("crack1", "crack2"), ti, {rate: rr(0.95, 1.15)*br, gain: 0.32*g, pan, hp: 900});
+        thump(ti, 190, 60, 0.09, 0.32*g, {pan});
+      }
     }
   }
+  function beam(t, pan, g, w){ // a held sizzle that sweeps across the rooms it cuts (0.9 s, as the fx)
+    play("heavy1", t, {rate: 0.55, gain: 0.35*g, pan, lp: 5000});
+    const f = w.dmg >= 2 ? 82 : 110, dur = 0.9;
+    for (const [type, det, v] of [["sawtooth", -9, 0.07], ["sawtooth", 9, 0.07], ["square", 0, 0.035]]) tone(type, f, t, dur, v*g, {detune: det, lp: 900, lpTo: 2800, q: 6, a: 0.05, r: 0.15, pan, fm: [0.5, 0.6, 0.3, 0.3]});
+    noise(t, dur + 0.1, 0.09*g, {type: "bandpass", f: 2500, to: 4200, q: 1.5, a: 0.04, hold: dur*0.8, pan});
+    tone("sine", f*4, t, dur, 0.04*g, {to: f*5, a: 0.08, r: 0.2, pan});
+  }
+  function ion(t, pan, g, lp){ // electric: a buzzing fall, ring-modulated, with a blue crackle
+    play("ionbuzz", t, {rate: rr(1.0, 1.12), gain: 0.4*g, pan, lp: lp || 12000});
+    tone("square", rr(950, 1050), t, 0.22, 0.05*g, {to: 260, lp: 3500, pan, fm: [1.414, 1.2, 0.2, 0.1]});
+    noise(t, 0.18, 0.08*g, {type: "highpass", f: 3500, pan});
+    thump(t, 210, 90, 0.1, 0.25*g, {pan});
+  }
+  /* ---------------- hits ---------------- */
+  // a shot lands on a room: weight scales with the damage; your own ship is close (fuller, with a metal groan),
+  // the enemy's is across the gap (a little duller)
+  function hit(ship, dmg = 1, w){
+    if (!ok("hit", 0.03)) return;
+    const t = ctx.currentTime, near = !ship || ship.you, pan = youPan(ship), lp = near ? 0 : 5200, d = Math.max(1, Math.min(4, dmg)), g = near ? 1 : 0.78;
+    const kind = w && w.type, big = kind === "missile" || d >= 3;
+    if (kind === "beam"){ play("bang3", t, {rate: rr(1.2, 1.4), gain: 0.35*g, pan, lp: lp || 9000}); noise(t, 0.3, 0.12*g, {type: "bandpass", f: 3200, q: 1.2, pan}); thump(t, 140, 50, 0.18, 0.3*g, {pan}); return; }
+    if (kind === "env"){ play(pick("bang2", "bang1"), t, {rate: rr(0.75, 0.9), gain: 0.6*g, pan, lp: 4000}); play(pick("clang1", "clang3"), t, {rate: rr(0.5, 0.6), gain: 0.4*g, pan}); thump(t, 110, 38, 0.35, 0.55*g, {pan}); return; }
+    play(pick("bang1", "bang2", "bang3"), t, {rate: rr(0.85, 1.0)*(big ? 0.85 : 1), gain: (0.55 + 0.12*d)*g, pan, lp: lp || 14000, verb: 0.25});
+    play(pick("clang1", "clang2", "clang3"), t + rr(0, 0.02), {rate: rr(0.62, 0.8), gain: (0.3 + 0.06*d)*g, pan, lp: lp || 9000});
+    thump(t, 130, 36, 0.3 + 0.08*d, (0.45 + 0.12*d)*g, {pan});
+    if (big || d >= 2) play(pick("boom1", "boom2"), t, {rate: rr(0.85, 1.05), gain: 0.5*g, pan});
+    if (kind === "missile") play("explo", t + 0.01, {rate: rr(0.9, 1.05), gain: 0.55*g, pan, lp: lp || 12000, verb: 0.3});
+    if (near && d >= 2) play("debris", t + 0.12, {rate: rr(0.9, 1.15), gain: 0.22 + 0.05*d, pan: pan + rr(-0.2, 0.2), hp: 400});
+    if (near) play("clang1", t + 0.05, {rate: rr(0.32, 0.4), gain: 0.18 + 0.05*d, pan, lp: 1200, verb: 0.4}); // the hull groans
+  }
+  function sysDamage(ship){ // sparks: a few quick electric snaps
+    if (!ok("sys", 0.15)) return;
+    const t = ctx.currentTime + 0.06, pan = youPan(ship), g = ship && ship.you ? 1 : 0.6;
+    for (let i = 0; i < 4; i++) noise(t + i*rr(0.03, 0.07), 0.03, rr(0.22, 0.4)*g, {type: "highpass", f: rr(2500, 5000), pan: pan + rr(-0.15, 0.15)});
+    tone("square", rr(1500, 2200), t, 0.08, 0.08*g, {to: 300, lp: 4000, pan}); play("ionbuzz", t, {rate: rr(1.6, 1.9), gain: 0.18*g, pan, dur: 0.15, fade: [0.08, 0.07]});
+  }
+  function miss(ship){ // the shot flies past
+    if (!ok("miss", 0.08)) return;
+    const t = ctx.currentTime, pan = youPan(ship);
+    noise(t, 0.34, 0.5, {type: "bandpass", f: 3600, to: 650, q: 1.2, pan: pan*1.6, a: 0.06}); tone("sine", 900, t, 0.25, 0.03, {to: 500, pan: pan*1.6});
+  }
+  // a shield takes it: the deep "thoom" of the bubble, a ring, and a high glassy flash; ion adds its buzz
+  function shield(ship, w){
+    if (!ok("shield", 0.04)) return;
+    const t = ctx.currentTime, pan = youPan(ship), g = ship && !ship.you ? 0.8 : 1;
+    play("field", t, {rate: rr(0.78, 0.9), gain: 0.55*g, pan, dur: 0.5, fade: [0.25, 0.25], verb: 0.35});
+    thump(t, 150, 62, 0.42, 0.5*g, {pan, verb: 0.3});
+    noise(t, 0.35, 0.12*g, {type: "bandpass", f: rr(380, 460), q: 9, pan, verb: 0.4});
+    tone("sine", rr(2300, 2600), t, 0.18, 0.05*g, {to: 1500, pan, decay: 0.2});
+    if (w && w.type === "ion") play("ionbuzz", t, {rate: 1.25, gain: 0.3*g, pan});
+  }
+  function shieldUp(ship){ // a layer comes back up
+    if (!ok("shieldUp", 0.25)) return;
+    const t = ctx.currentTime, pan = youPan(ship), g = ship && ship.you ? 1 : 0.45;
+    play("field", t, {rate: rr(1.35, 1.5), gain: 0.18*g, pan, dur: 0.35, fade: [0.15, 0.2]});
+    tone("sine", 620, t, 0.2, 0.05*g, {to: 940, glide: 0.18, pan, r: 0.15});
+  }
+  /* ---------------- hazards ---------------- */
+  function ignite(ship, kind){
+    if (!ok("ign:" + kind, 0.1)) return;
+    const t = ctx.currentTime, pan = youPan(ship), g = ship && ship.you ? 1 : 0.6;
+    if (kind === "fire"){ noise(t, 0.6, 0.22*g, {type: "lowpass", f: 250, to: 2200, glide: 0.25, a: 0.08, pan}); play("bang3", t, {rate: 0.55, gain: 0.25*g, pan, lp: 1500}); }
+    else { play(pick("clang1", "clang3"), t, {rate: rr(0.45, 0.55), gain: 0.4*g, pan}); play("hiss", t + 0.03, {gain: 0.36*g, pan, dur: 1.2, fade: [0.5, 0.7], hp: 800}); play("puff", t, {rate: 0.7, gain: 0.4*g, pan}); }
+  }
+  let lastFrame = 0, alarmT = -99, wasLow = false, wasFtl = 0, wasLayers = -1, frameAt = 0;
+  // per frame of a fight (src/p2.js update): the fire and breach loops follow how much is burning and open,
+  // the low-hull alarm, the drive's ready chime, shield layers coming back up
+  function frame(S){
+    if (!ctx || !S || !S.you) return;
+    lastFrame = performance.now(); const t = ctx.currentTime; if (t - frameAt < 0.06 && t >= frameAt) return; frameAt = t;
+    const count = (ship, k) => ship && ship.hz ? Object.values(ship.hz).filter(h => h[k] > 0).length : 0;
+    const fire = Math.min(1, count(S.you, "fire")*0.32 + count(S.foe, "fire")*0.08), air = Math.min(1, count(S.you, "breach")*0.4 + count(S.foe, "breach")*0.06);
+    setLoop(loops.fire, fire*0.45, t); setLoop(loops.air, air*0.1, t);
+    const you = S.you, low = !S.over && you.hull > 0 && you.hull <= you.maxHull*0.3;
+    if (low && (!wasLow || t - alarmT > 14)){ alarm(wasLow ? 0.5 : 1); alarmT = t; } wasLow = low;
+    if (!S.over && you.ftl >= 1 && wasFtl < 1 && S.t > 1) ftlReady(); wasFtl = you.ftl || 0;
+    if (wasLayers >= 0 && you.layers > wasLayers && !S.over) shieldUp(you); wasLayers = you.layers;
+  }
+  function setLoop(l, v, t){ if (!l || Math.abs(v - l.lvl) < 0.01) return; l.lvl = v; l.g.gain.setTargetAtTime(v, t, 0.3); }
+  function tick(){ // loops fall silent when the fight stops updating (paused, over, a menu)
+    if (!ctx) return;
+    if (performance.now() - lastFrame > 250){ const t = ctx.currentTime; setLoop(loops.fire, 0, t); setLoop(loops.air, 0, t); wasLayers = -1; wasFtl = 0; }
+    if (fb) fb.tick();
+  }
+  function alarm(v = 1){ // FTL's hull warning: a two-tone klaxon, three times
+    if (!ok("alarm", 0.5)) return;
+    const t = ctx.currentTime;
+    for (let i = 0; i < 3; i++){ const ti = t + i*0.42; tone("square", 784, ti, 0.17, 0.05*v, {lp: 2400, r: 0.04}); tone("square", 587, ti + 0.2, 0.17, 0.05*v, {lp: 2000, r: 0.04}); tone("sine", 784, ti, 0.17, 0.05*v, {r: 0.04}); }
+  }
+  function ftlReady(){ // the drive is charged: a bright two-note chime in the score's key
+    if (!ok("ftl", 1)) return;
+    const t = ctx.currentTime;
+    [[880, 0], [1175, 0.13], [1760, 0.26]].forEach(([f, d], i) => tone("sine", f, t + d, 0.5, 0.11 - i*0.018, {fm: [3.5, 1.2, 0.1, 0.3], decay: 0.9, pan: (i - 1)*0.3, verb: 0.3}));
+  }
+  /* ---------------- crew ---------------- */
+  const crewT = new WeakMap();
+  // per frame: footsteps (very soft), punches in melee, tools on a repair, the extinguisher on a fire, the torch on a breach
+  function crew(list, dt, S){
+    if (!ctx || mode === 2 || ctx.state !== "running" || !S) return;
+    let steps = 0;
+    for (const c of list){
+      if (c.hp <= 0 || !c.act || c.act === "idle") continue;
+      const mine = c.on === "you", seen = mine || c.side === "you"; if (!seen) continue;
+      let k = crewT.get(c); if (!k){ k = {t: Math.random()*0.5}; crewT.set(c, k); }
+      k.t -= dt; if (k.t > 0) continue;
+      const t = ctx.currentTime + 0.01, pan = c.on === "you" ? -0.22 : 0.22, g = mine ? 1 : 0.6;
+      if (c.act === "walk"){ k.t = 0.34*rr(0.9, 1.1); if (steps++ < 2 && ok("step", 0.09)) play(pick("step1", "step2", "step3"), t, {rate: rr(0.85, 1.2), gain: 0.11*g, pan, lp: 2500}); }
+      else if (c.act === "fight"){ k.t = rr(0.55, 0.9); if (ok("punch", 0.12)){ play(pick("punch1", "punch2", "punch3"), t, {rate: rr(0.85, 1.15), gain: 0.2*g, pan}); if (Math.random() < 0.3) tone("sine", rr(140, 180), t, 0.08, 0.12*g, {to: 70, pan}); } }
+      else if (c.act === "repair"){ k.t = rr(0.6, 1.1); if (ok("tool", 0.2)) play(pick("tool1", "tool2", "tool3"), t, {rate: rr(0.9, 1.12), gain: 0.16*g, pan}); }
+      else if (c.act === "fire"){ k.t = rr(0.5, 0.7); if (ok("ext", 0.25)) play("hiss", t, {at: rr(0, 1.2), dur: 0.45, gain: 0.14*g, pan, hp: 2500, fade: [0.25, 0.2]}); }
+      else if (c.act === "seal"){ k.t = rr(0.25, 0.45); if (ok("weld", 0.15)){ noise(t, 0.06, 0.14*g, {type: "highpass", f: 4500, pan}); tone("square", rr(2400, 3200), t, 0.04, 0.03*g, {lp: 5000, pan}); } }
+      else k.t = 0.5;
+    }
+  }
+  function door(ship, open){
+    if (!ship || !ship.you || !ok(open ? "door" : "doorc", 0.12)) return;
+    const t = ctx.currentTime;
+    if (open){ play("puff", t, {rate: rr(1.2, 1.45), gain: 0.09, pan: -0.22, hp: 1500}); play("latch", t, {rate: rr(1.1, 1.3), gain: 0.07, pan: -0.22}); }
+    else { play("latch", t, {rate: rr(0.85, 1.0), gain: 0.16, pan: -0.22, lp: 5000}); play("puff", t, {rate: rr(0.8, 0.95), gain: 0.04, pan: -0.22, hp: 1500}); }
+  }
+  function doorBreak(ship){ // a boarder smashes a door in
+    if (!ok("doorBreak", 0.3)) return;
+    const t = ctx.currentTime, pan = youPan(ship);
+    play(pick("clang1", "clang3"), t, {rate: rr(0.7, 0.85), gain: 0.5, pan}); play("bang3", t, {rate: 1.2, gain: 0.3, pan, lp: 4000}); play("debris", t + 0.05, {rate: 1.3, gain: 0.2, pan});
+  }
+  /* ---------------- moments ---------------- */
+  function teleport(){
+    if (!ok("tele", 0.2)) return;
+    const t = ctx.currentTime;
+    play("teleport", t, {rate: rr(0.95, 1.05), gain: 0.55, verb: 0.35});
+    for (let i = 0; i < 4; i++) tone("sine", 500*Math.pow(1.5, i), t + i*0.06, 0.35, 0.03, {to: 1000*Math.pow(1.5, i), glide: 0.3, pan: (i % 2 ? 0.4 : -0.4), r: 0.2, verb: 0.4});
+    noise(t, 0.6, 0.06, {type: "bandpass", f: 1200, to: 7000, q: 3});
+  }
+  function cloak(){
+    if (!ok("cloak", 0.3)) return;
+    const t = ctx.currentTime;
+    noise(t, 0.8, 0.09, {type: "bandpass", f: 4500, to: 300, q: 3});
+    play("field", t, {rate: 0.6, gain: 0.24, dur: 0.6, fade: [0.3, 0.3], verb: 0.4});
+    tone("sine", 420, t, 0.6, 0.06, {to: 90, r: 0.3});
+    for (let i = 0; i < 3; i++) tone("sine", 2200 - i*500, t + i*0.08, 0.3, 0.02, {to: 400, r: 0.2, pan: i - 1, verb: 0.5});
+  }
+  function jump(){ // the drive spools up, then the ship is gone in a rush
+    if (!ok("jump", 1)) return;
+    const t = ctx.currentTime;
+    tone("sawtooth", 90, t, 0.95, 0.06, {to: 1500, glide: 0.95, lp: 1200, lpTo: 6000, q: 4, a: 0.1, r: 0.06});
+    tone("sine", 180, t, 0.95, 0.08, {to: 2400, glide: 0.95, a: 0.1, r: 0.06});
+    noise(t, 1.0, 0.1, {type: "bandpass", f: 200, to: 4000, q: 2, a: 0.6});
+    const j = t + 0.95;
+    noise(j, 1.1, 0.34, {type: "lowpass", f: 9000, to: 160, glide: 0.9, must: true});
+    thump(j, 120, 30, 0.8, 0.6, {must: true});
+    play("teleport", j, {rate: 0.62, gain: 0.45, verb: 0.4, must: true});
+    play("boom2", j, {rate: 1.2, gain: 0.35, must: true});
+  }
+  function explosion(ship, n = 5){ // a ship coming apart: a chain of blasts across it, then debris
+    if (!ok("explosion", 0.8)) return;
+    const t = ctx.currentTime, pan = youPan(ship), near = ship && ship.you;
+    for (let i = 0; i < n; i++){ const ti = t + i*rr(0.18, 0.32) + (i ? 0.05 : 0);
+      play(pick("bang1", "bang2", "bang3", "explo"), ti, {rate: rr(0.7, 0.95), gain: 0.6 - i*0.05, pan: pan + rr(-0.3, 0.3), lp: near ? 0 : 7000, verb: 0.4, must: true});
+      thump(ti, 110, 30, 0.6, 0.45 - i*0.04, {must: true}); }
+    play("explo", t, {rate: 0.78, gain: 0.75, pan, verb: 0.5, must: true});
+    play("boom2", t + 0.1, {rate: 0.8, gain: 0.7, must: true});
+    play("debris", t + 0.5, {rate: 0.85, gain: 0.4, pan, must: true}); play("debris", t + 1.1, {rate: 1.1, gain: 0.25, pan: -pan, must: true});
+    noise(t, 2.4, 0.18, {type: "lowpass", f: 900, to: 90, must: true});
+  }
+  function crewDeath(){ // a crew member dies: a heavy blow, a falling tone, a low bell
+    if (!ok("death", 0.4)) return;
+    const t = ctx.currentTime;
+    play("punch2", t, {rate: 0.7, gain: 0.4});
+    tone("sine", 660, t + 0.05, 0.55, 0.06, {to: 160, glide: 0.5, r: 0.2});
+    tone("sine", 220, t + 0.2, 1.4, 0.06, {fm: [3.5, 1.4, 0.05, 0.4], decay: 1.8, verb: 0.6});
+    tone("sine", 233, t + 0.2, 1.4, 0.03, {decay: 1.6});
+  }
+  function zap(){ // a defence drone shoots a missile down
+    if (!ok("zap", 0.08)) return;
+    const t = ctx.currentTime;
+    play("laser3", t, {rate: rr(1.4, 1.6), gain: 0.6, pan: -0.22}); play("bang3", t + 0.06, {rate: 1.6, gain: 0.5, pan: 0.1, hp: 800});
+  }
+  // interface
+  function ui(kind){
+    if (!ok("ui:" + kind, 0.04)) return;
+    const t = ctx.currentTime;
+    switch (kind){
+      case "tap": play("tap", t, {rate: rr(0.98, 1.06), gain: 0.32, hp: 400}); break;
+      case "confirm": play("confirm", t, {gain: 0.32}); play("tap", t, {rate: 1.5, gain: 0.12}); break;
+      case "deny": play("deny", t, {gain: 0.28, jit: 0}); break;
+      case "target": play("tap", t, {rate: 1.35, gain: 0.26}); tone("sine", 1760, t + 0.04, 0.06, 0.035, {r: 0.05}); tone("sine", 2349, t + 0.1, 0.08, 0.03, {r: 0.08}); break;
+      case "power+": play("switch", t, {rate: 1.12, gain: 0.3, jit: 0}); tone("sine", 660, t, 0.06, 0.04, {to: 990}); break;
+      case "power-": play("switch", t, {rate: 0.86, gain: 0.3, jit: 0}); tone("sine", 660, t, 0.06, 0.035, {to: 440}); break;
+      case "buy": play("coins", t, {gain: 0.42}); play("confirm", t + 0.05, {gain: 0.2, rate: 1.06}); break;
+      case "upgrade": play("confirm", t, {gain: 0.25, rate: 1.12}); [587, 740, 880, 1175].forEach((f, i) => tone("sine", f, t + 0.05 + i*0.06, 0.18, 0.045, {fm: [2, 0.8, 0.1, 0.1], decay: 0.35, verb: 0.2})); break;
+      case "levelup": [587, 740, 880].forEach((f, i) => tone("sine", f*2, t + i*0.09, 0.3, 0.075, {fm: [3.5, 1, 0.05, 0.2], decay: 0.6, verb: 0.3})); break;
+      case "text": for (let i = 0; i < 7; i++) play("tick", t + i*rr(0.04, 0.07) + i*0.01, {rate: rr(0.85, 1.35), gain: rr(0.2, 0.3), jit: 0}); break;
+      case "fixed": tone("sine", 1175, t, 0.12, 0.07, {fm: [2, 0.5, 0.05, 0.1], decay: 0.25}); tone("sine", 1568, t + 0.08, 0.16, 0.07, {fm: [2, 0.5, 0.05, 0.1], decay: 0.35}); play("latch", t, {gain: 0.16}); break;
+      case "signal": tone("sine", 880, t, 0.4, 0.09, {fm: [3, 0.6, 0.05, 0.2], decay: 0.6, verb: 0.35}); tone("sine", 1318, t + 0.16, 0.5, 0.08, {fm: [3, 0.6, 0.05, 0.2], decay: 0.8, verb: 0.35, pan: 0.2}); break;
+    }
+  }
+  /* ---------------- the old names (sfx("laser") etc.) ---------------- */
+  function sfx(name, vol = 1){
+    try {
+      if (!ctx || mode === 2 || ctx.state !== "running") return;
+      const you = typeof S !== "undefined" && S ? S.you : null, foe = typeof S !== "undefined" && S ? S.foe : null;
+      switch (name){
+        case "laser": return weapon({type: "laser", shots: 1, dmg: 1, id: "drone"}, you);
+        case "missile": case "beam": case "ion": return weapon({type: name, shots: 1, dmg: 1}, you);
+        case "shield": return shield(you);
+        case "hit": return hit(you, Math.round(vol*4));
+        case "boom": return explosion(foe);
+        case "death": return crewDeath();
+        case "zap": return zap();
+        case "click": return ui("tap");
+        case "buy": return ui("buy");
+        case "jump": return jump();
+        case "teleport": return teleport();
+        case "cloak": return cloak();
+        case "alarm": return alarm();
+        case "signal": return ui("signal");
+        case "win": return sting("win");
+        default: return ui(name);
+      }
+    } catch {}
+  }
+  /* ---------------- a stand-in score, only if the music files cannot load ---------------- */
+  function fallbackScore(){
+    const SPB = 60/96/4, PROGS = [[57,0],[53,1],[48,1],[55,1]], mtof = m => 440*Math.pow(2, (m - 69)/12);
+    const ex = ctx.createGain(), ba = ctx.createGain(); ex.connect(stemGain.explore); ba.connect(stemGain.battle);
+    stemGain.explore.gain.setTargetAtTime(1, ctx.currentTime, 0.5); ba.gain.value = 0;
+    let step = 0, nextT = ctx.currentTime + 0.1, on = false;
+    return {
+      battle(v, t){ on = v; ba.gain.setTargetAtTime(v ? 1 : 0, t, v ? 0.4 : 1.2); },
+      tick(){
+        if (ctx.state !== "running" || mode !== 0) { nextT = ctx.currentTime + 0.1; return; }
+        while (nextT < ctx.currentTime + 0.2){
+          const [root, maj] = PROGS[Math.floor(step/16) % 4], s = step % 16, tn = [root, root + (maj ? 4 : 3), root + 7, root + 12], t = nextT;
+          if (s === 0){ for (const n of tn.slice(0, 3)) tone("sawtooth", mtof(n + 12), t, SPB*15, 0.02, {a: 1, r: 1.2, lp: 900, dest: ex}); tone("sine", mtof(root - 12), t, SPB*15, 0.12, {a: 0.08, r: 0.5, dest: ex}); }
+          if (s % 2 === 0){ const pat = [0,1,2,1,2,3,2,1]; tone("triangle", mtof(tn[pat[(s/2) % 8]] + 12), t, SPB*1.4, 0.045, {r: 0.3, dest: ex}); }
+          if (on){ if (s === 0 || s === 8) tone("sine", 150, t, 0.22, 0.45, {to: 42, glide: 0.14, dest: ba}); if (s === 4 || s === 12) noise(t, 0.16, 0.2, {type: "bandpass", f: 1900, q: 0.7, dest: ba});
+            if ([0,2,3,6,8,10,11,14].includes(s)) tone("sawtooth", mtof(root - 12), t, SPB*1.5, 0.1, {lp: 400, dest: ba}); }
+          step = (step + 1) % 64; nextT += SPB;
+        }
+      }
+    };
+  }
+  /* ---------------- wiring ---------------- */
   document.addEventListener("visibilitychange", () => { if (!ctx) return; if (document.hidden) ctx.suspend(); else ctx.resume(); });
+  // iOS only lets audio start inside a user gesture: the very first tap anywhere starts it
+  for (const ev of ["pointerdown", "touchend", "click", "keydown"]) addEventListener(ev, () => { if (!ctx || ctx.state !== "running") unlock(); }, {capture: true, passive: true});
   const btn = document.getElementById("sndBtn");
-  btn.textContent = label();
-  btn.addEventListener("click", () => { unlock(); mode = (mode + 1) % 3; try { localStorage.setItem("ftlr.snd", String(mode)); } catch {} applyMode(); sfx("click"); });
-  return {unlock, sfx, setBattle};
+  if (btn){ btn.textContent = label();
+    btn.addEventListener("click", () => { unlock(); mode = (mode + 1) % 3; try { localStorage.setItem("ftlr.snd", String(mode)); } catch {} applyMode(); ui("tap"); }); }
+  const safe = fn => (...a) => { try { return fn(...a); } catch {} };
+  return {unlock, sfx: safe(sfx), setBattle: safe(setBattle), sting: safe(sting), weapon: safe(weapon), hit: safe(hit), miss: safe(miss), shield: safe(shield),
+    sysDamage: safe(sysDamage), ignite: safe(ignite), frame: safe(frame), crew: safe(crew), door: safe(door), doorBreak: safe(doorBreak), ui: safe(ui), explosion: safe(explosion),
+    teleport: safe(teleport), cloak: safe(cloak), jump: safe(jump), crewDeath: safe(crewDeath), alarm: safe(alarm), zap: safe(zap),
+    get ctx(){ return ctx; }, get state(){ return {mode, music: musicState, battle: battleOn, voices, samples: Object.keys(buf).length}; }};
 })();
 
+/* SOUND lives in src/audio.js (AUDIO). */
 /* ============================================================
    BOOT
    ============================================================ */
@@ -7032,21 +7510,7 @@ const DIAG = {on: hashFlag("debug"), n: 0, t0: 0, fps: 0, el: null,
       ` · ${this.fps} fps · ${S ? S.mode : "-"}${ua ? " · " + ua[0] : ""}` + (lastError ? `\nlast error: ${lastError}` : "");
   }
 };
-addEventListener("hashchange", () => { DIAG.on = hashFlag("debug"); if (!DIAG.on && DIAG.el){ DIAG.el.remove(); DIAG.el = null; } debugBar(); });
-/* #debug testing controls, for reaching later sectors in a test run: FF runs fights 8x, NEXT SECTOR leaves the map's sector */
-DIAG.ff = false;
-function debugBar(){
-  let bar = $("dbgBar");
-  if (!DIAG.on){ if (bar) bar.remove(); DIAG.ff = false; return; }
-  if (bar) return;
-  bar = document.createElement("div"); bar.id = "dbgBar";
-  bar.style.cssText = "position:fixed;left:50%;top:2px;transform:translateX(-50%) scale(.6);transform-origin:top center;z-index:9999;display:flex;gap:4px;opacity:.7"; // top middle, small: never over PLAY, crew cards or beacons
-  bar.innerHTML = `<button class="btn" id="dbgFF">FF x8: OFF</button><button class="btn" id="dbgSector">NEXT SECTOR</button>`;
-  document.body.appendChild(bar);
-  $("dbgFF").addEventListener("click", () => { DIAG.ff = !DIAG.ff; $("dbgFF").textContent = `FF x8: ${DIAG.ff ? "ON" : "OFF"}`; });
-  $("dbgSector").addEventListener("click", () => { if (!R || !S || S.mode !== "map" || R.sector >= SECTORS) return; closeSheet(); nextSector(); });
-}
-debugBar();
+addEventListener("hashchange", () => { DIAG.on = hashFlag("debug"); if (!DIAG.on && DIAG.el){ DIAG.el.remove(); DIAG.el = null; } });
 function boot(data){
   set3D(STAGE.ok, STAGE.why);
   loadArt();
