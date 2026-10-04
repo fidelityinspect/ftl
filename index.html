@@ -1195,7 +1195,7 @@ function startFight(foe, opts = {}){
   S = {mode:"fight", focus:"you", paused:true, over:null, selW:null, selC:null, boardArm:false, you:R.you, foe, fx:[], parts:[], floats:[], zaps:[], rings:[], bubbles:[],
        shake:0, t:0, aiT:0, hitstop:0, slow:0, redFlash:0, foeDmgMult: 1 + 0.06*(R.sector-1), boss: !!opts.boss, intro: opts.intro || "", saidLow:false, saidShields:0};
   prepShip(R.you); prepShip(foe);
-  for (const c of [...R.you.crew, ...foe.crew]) if (c.hp > 0){ const sl = slotOf(c); c.gx = sl.x; c.gy = sl.y; c.route = null; } // crew stand at their posts while the fight opens paused
+  for (const c of [...R.you.crew, ...foe.crew]) if (c.hp > 0){ c.gx = null; crewPlace(S[c.on], c, shipNav(S[c.on])); } // crew stand at their posts while the fight opens paused
   for (const d of R.pendingSysDmg || []){ const s = R.you.sys[d.system]; if (s) s.dmg = Math.min(s.level, s.dmg + d.amount); }
   R.pendingSysDmg = [];
   clampPower(R.you); restorePower(R.you); // a reload mid-fight brings your shields and medbay back on
@@ -1265,6 +1265,7 @@ function update(dt){
   if (S.foe.env) envTick(dt);
   S.aiT -= dt; if (S.aiT <= 0 && !S.foe.env){ S.aiT = 0.4; enemyAI(); }
   const crew = allCrew();
+  navDoorsTick(S.you, dt); navDoorsTick(S.foe, dt); // doors open ahead of crew and shut behind them
   for (const c of crew) crewTick(c, dt);
   bondTick(dt);
   for (const c of crew) if (c.hp <= 0 && !c.dead){
@@ -1371,42 +1372,28 @@ function updateOxygen(ship, dt){
     if ((ship.o2[c.room] ?? 100) < R_.o2Suffocate){ c.hp -= R_.suffocateDps*dt; c.cause = "suffocated"; }
   }
 }
-function slotOf(c){
-  const ship = S[c.on]; const r = room(ship, c.dest) || ship.layout[0];
-  const occ = allCrew().filter(o => o.on === c.on && o.dest === c.dest && o.hp > 0);
-  const i = occ.indexOf(c), tiles = Math.max(1, r.w*r.h), k = i % tiles, over = Math.floor(i / tiles);
-  // one crew member to a square, filled across then down; anyone past capacity squeezes in beside
-  return {x: r.x + (k % r.w) + 0.5 + over*0.22, y: r.y + Math.floor(k / r.w) + 0.62};
-}
+// where a crew member stands in the room they are headed for: its station if they work it, else a floor spot of
+// their own (src/crewnav.js navTarget), in their ship's walk-graph units
+function slotOf(c){ return navTarget(S[c.on], c); }
 function crewTick(c, dt){
   if (c.hp <= 0) return;
   const R_ = MOD.rules, ship = S[c.on], sp = SP(c);
   if (!room(ship, c.dest)) c.dest = ship.layout[0].id;
-  const slot = slotOf(c);
-  if (c.gx == null){ c.gx = slot.x; c.gy = slot.y; c.route = null; }
-  // on the way to another room: follow the graph (doors, lift, tubes) instead of a straight line
-  if (c.room !== c.dest && c.routeTo !== c.dest){ c.routeTo = c.dest; c.route = crewRoute(ship, roomAtGrid(ship, c.gx, c.gy), c.dest, c.gx, c.gy); }
-  if (c.room === c.dest) c.route = null;
-  const wp = c.route && c.route.length ? c.route[0] : null, t = wp || slot;
-  const locks = ship._tube || (ship._tube = {});
-  const holder = wp && wp.ride && wp.kind === "tube" ? locks[wp.id] : null, riding = h => h.hp > 0 && h.on === c.on && h.route && h.route[0] && h.route[0].id === wp.id && h.route[0].ride;
-  if (holder && holder !== c && riding(holder)){ c.act = "idle"; return; } // one at a time in a tube
-  if (wp && wp.ride && wp.kind === "tube") locks[wp.id] = c;
-  const ds = S[c.on], doorDrag = c.side !== c.on && ds && ds.sys && ds.sys.doors ? 1/(1 + MOD.rules.doorBoarderDrag*cap(ds, "doors")) : 1; // boarders force every door
-  const dx = t.x - c.gx, dy = t.y - c.gy, d = Math.hypot(dx,dy), mult = (wp && wp.ride ? LINK_SPEED[wp.kind] : 1)*doorDrag;
-  if (d > 0.01){ const st = Math.min(d, dt*2.6*sp.speed*mult*walkScale(ship)); c.gx += dx/d*st; c.gy += dy/d*st; c.face = Math.atan2(dy, dx); c.act = "walk"; c.walkT = (c.walkT || 0) + dt*sp.speed; }
-  if (wp && Math.hypot(t.x - c.gx, t.y - c.gy) <= 0.01){ if (wp.ride && locks[wp.id] === c) delete locks[wp.id]; c.route.shift(); }
-  const r = room(ship, c.dest);
-  if (c.room !== c.dest && c.gx > r.x && c.gx < r.x + r.w && c.gy > r.y && c.gy < r.y + r.h) c.room = c.dest;
+  // walk the ship's walk graph: through doors only, along the floor (src/crewnav.js); boarders force every door
+  const ds = S[c.on], doorDrag = c.side !== c.on && ds && ds.sys && ds.sys.doors ? 1/(1 + MOD.rules.doorBoarderDrag*cap(ds, "doors")) : 1;
+  const moved = crewMove(ship, c, dt, 2.6*sp.speed*doorDrag*walkScale(ship)), walking = moved > 1e-6;
+  if (walking){ c.act = "walk"; c.walkT = (c.walkT || 0) + dt*sp.speed; }
   if (c.room !== c.dest) return;
-  if (d <= 0.01) c.act = "idle";
+  if (!walking) c.act = "idle";
   if (c.side === "you" && !c.hurtSaid && c.hp < c.maxHp*0.35){ c.hurtSaid = true; bark(c, "hurt"); }
   const foes = allCrew().filter(o => o.on === c.on && o.room === c.room && o.hp > 0 && o.side !== c.side);
+  if (!foes.includes(c._foe)) c._foe = null;
   if (foes.length){
     const t2 = foes.reduce((a,b) => a.hp < b.hp ? a : b);
+    if (!c._foe) c._foe = foes.find(o => o._foe === c) || foes.reduce((a, b) => Math.hypot(a.gx - c.gx, a.gy - c.gy) <= Math.hypot(b.gx - c.gx, b.gy - c.gy) ? a : b); // who they square up to (navTarget closes in on them)
     const dmg = R_.crewDps*sp.combat*(1 + 0.2*lvl(c,"combat"))*workMult(c)*(c.side === "foe" ? S.foeDmgMult*(c.on === "you" && R && R.sector <= 1 ? 0.7 : 1) : 1)*(c.side === c.on ? 1.3 : 1)*dt;
     t2.hp -= dmg; if (t2.hp <= 0 && !t2.killer) t2.killer = c;
-    c.act = "fight"; c.face = Math.atan2((t2.gy ?? c.gy) - c.gy, (t2.gx ?? c.gx) - c.gx); c.fix = 0;
+    c.act = walking ? "walk" : "fight"; if (!walking) c.face = Math.atan2((c._foe.gy ?? c.gy) - c.gy, (c._foe.gx ?? c.gx) - c.gx); c.fix = 0;
     gainXp(c, "combat", dt*2);
     if (c.side === "you" && S.t - c.lastBark > 10 && Math.random() < dt*0.3) bark(c, "boarders");
     return;
@@ -1414,16 +1401,16 @@ function crewTick(c, dt){
   const home = c.side === ship.key, h = ship.hz[c.room], s = ship.sys[c.room];
   const work = sp.repair*(1 + 0.1*lvl(c,"repair"))*workMult(c); // FTL K8: repair skill +10% / +20%
   if (home){
-    if (h && h.fire > 0){ h.fire -= dt*100/R_.extinguishTime*(sp.fireproof ? 1.3 : 1)*workMult(c); c.act = "fire"; gainXp(c, "repair", dt); if (h.fire <= 0){ h.fire = 0; float(ship, c.room, "FIRE OUT", "#7cf29a"); } return; }
-    if (h && h.breach > 0){ h.breach -= dt*100/R_.sealTime*work; c.act = "seal"; gainXp(c, "repair", dt); if (h.breach <= 0){ h.breach = 0; float(ship, c.room, "SEALED", "#7cf29a"); } return; }
+    if (h && h.fire > 0){ h.fire -= dt*100/R_.extinguishTime*(sp.fireproof ? 1.3 : 1)*workMult(c); c.act = walking ? "walk" : "fire"; gainXp(c, "repair", dt); if (h.fire <= 0){ h.fire = 0; float(ship, c.room, "FIRE OUT", "#7cf29a"); } return; }
+    if (h && h.breach > 0){ h.breach -= dt*100/R_.sealTime*work; c.act = walking ? "walk" : "seal"; gainXp(c, "repair", dt); if (h.breach <= 0){ h.breach = 0; float(ship, c.room, "SEALED", "#7cf29a"); } return; }
     if (s && s.dmg > 0){
-      c.fix += dt / R_.repairTime * work; c.act = "repair";
+      c.fix += dt / R_.repairTime * work; c.act = walking ? "walk" : "repair";
       if (c.fix >= 1){ c.fix = 0; s.dmg--; float(ship, c.room, "REPAIRED", "#7cf29a"); gainXp(c, "repair", 8); if (Math.random() < 0.25) bark(c, "repair"); }
     } else { c.fix = 0; if (s && c.act !== "walk") c.act = canMan(c) ? "man" : "idle"; }
     if (c.room === "medbay" && eff(ship,"medbay") > 0) c.hp = Math.min(c.maxHp, c.hp + dt * byLevel(R_.medbayHeal, eff(ship,"medbay")));
   } else {
     if (s && s.dmg < s.level){
-      s.sab += dt*sp.combat; c.act = "repair";
+      s.sab += dt*sp.combat; c.act = walking ? "walk" : "repair";
       if (s.sab >= R_.sabotageTime){ s.sab = 0; s.dmg++; float(ship, c.room, "SABOTAGED", "#ff9b5c"); clampPower(ship); if (!ship.you) autoPowerEnemy(ship); }
     } else if (c.side === "foe"){
       const next = ship.layout.filter(q => ship.sys[q.id] && ship.sys[q.id].dmg < ship.sys[q.id].level);
@@ -1786,12 +1773,15 @@ function rcenter(ship, id){ const r = room(ship,id) || ship.layout[0]; const q =
 function shipBox(ship){ const d = dims(ship), g = G(ship); return {x:g.ox, y:g.oy, w:d.c*g.cell, h:rowsPx(ship)*g.cell}; }
 function crewPx(c){ const ship = S[c.on], g = G(ship), plan = shipPlan(ship), x = g.ox + c.gx*g.cell;
   const ca = cutArt(ship);
-  if (ca){ // walk the grid, stand in the painted room: same place relative to the room, inside its painted outline
-    const st = ship.cut.kit && typeof kitStation === "function" ? kitStation(ship, c) : null; // working a machine: on its station
-    if (st){ const sh = SHAPED[ship.cut.art], cs = sh.kd.crew ? sh.kd.crew*ca.s : g.cell; return {x: ca.x + st.x*ca.s, y: ca.y + st.y*ca.s - cs*0.31}; }
-    const rid =roomAtGrid(ship, c.gx, c.gy), q = room(ship, rid), cr = q && ship.cut.rooms[rid];
-    if (cr){ const u = clamp((c.gx - q.x)/q.w, 0.08, 0.92), v = clamp((c.gy - q.y)/q.h, 0.15, 0.95);
-      return {x: ca.x + (cr[0] + u*cr[2])*ca.s, y: ca.y + (cr[1] + v*cr[3])*ca.s}; } }
+  if (ca){ // the walk graph's point on the art (src/crewnav.js): feet on the floor, cs*0.31 above them is the figure's anchor
+    const nav = shipNav(ship), sh = SHAPED[ship.cut.art];
+    if (nav.painted && c._navKey === nav.key && sh && sh.kd){ const T = sh.kd.tile*ca.s, cs = sh.kd.crew*ca.s;
+      return {x: ca.x + c.gx*T, y: ca.y + c.gy*T - cs*0.31, hidden: !!(c._navX && c._navX.hatch != null)}; } // out of sight while climbing a hatch
+    // a grid ship's rooms sit on its art as one even grid, so every room maps the same way: a door crossing is one smooth step
+    const rid = c._navKey === nav.key && room(ship, c._navRoom) ? c._navRoom : roomAtGrid(ship, c.gx, c.gy), q = room(ship, rid), cr = q && ship.cut.rooms[rid];
+    if (cr){ let u = (c.gx - q.x)/q.w, v = (c.gy - q.y)/q.h;
+      if (ship.cut.kit){ u = clamp(u, 0.08, 0.92); v = clamp(v, 0.15, 0.95); } // a painted ship still loading its walk graph: keep inside its walk area
+      return {x: ca.x + (cr[0] + u*cr[2])*ca.s, y: ca.y + (cr[1] + v*cr[3])*ca.s, hidden: !!(c._navX && c._navX.hatch != null)}; } }
   if (perDeck(ship)){ const k = plan.deckOf(clamp(Math.floor(c.gy), 0, plan.d.r - 1)), D = plan.decks[k]; if (k !== viewDeck){ const t = tabPoint(k); return {x: t.x, y: t.y, hidden: true}; } return {x, y: g.oy + (c.gy - D.y0)*g.cell}; }
   if (FIGHT_VIEW === "a"){ // cutaway: people stand on their deck's floor, and ride straight up or down at a lift or tube
     const hs = Math.max(16, g.cell*0.5), floorOf = row => g.oy + (row + 1 + gapBefore(plan, row))*g.cell - g.cell*0.1 - hs*0.34, b = plan.breaks.find(b => Math.abs(c.gy - b) < CROSS);
@@ -3400,7 +3390,7 @@ const RACE_ROW = {human: 0, tinker: 0, myrm: 1, basalt: 1, lumen: 2}, FRAME_COL 
 // drawn by the older atlas below. Frames: idle, walk1-4, op1-2, sit, link, fight, hurt, down, repair.
 const CREW2 = {im: null, idx: null};
 (() => { const im = new Image(); im.onload = () => { fetch("art/crew_v2.json").then(r => r.ok ? r.json() : null).then(j => { if (!j || !j.skins) return; CREW2.im = im; CREW2.idx = j; SPRITES.clear(); PORTRAITS.clear(); if (S && S.mode === "fight") buildDeck(); }).catch(() => {}); }; im.src = "art/crew_v2.png"; })();
-const CREW2_FALLBACK = {walk1: ["walk1", "walk3"], walk2: ["walk3", "walk1"], fight: ["fight", "op1"], work: ["repair", "op1"], op1: ["op1"], op2: ["op2", "op1"], sit: ["sit", "op1"], link: ["link", "op1"], down: ["down"], hurt: ["hurt"]};
+const CREW2_FALLBACK = {walk1: ["walk1", "walk3"], walk2: ["walk2", "walk3", "walk1"], walk3: ["walk3", "walk1"], walk4: ["walk4", "walk2", "walk1"], fight: ["fight", "op1"], work: ["repair", "op1"], op1: ["op1"], op2: ["op2", "op1"], sit: ["sit", "op1"], link: ["link", "op1"], down: ["down"], hurt: ["hurt"]};
 function crewLookId(c){ const K_ = CREW2.idx && CREW2.idx.skins; return K_ && c.look && K_[c.look] ? c.look : null; }
 function crewFrame2(c, frame){ const lk = crewLookId(c); if (!lk) return null; const F = CREW2.idx.skins[lk].frames;
   for (const f of CREW2_FALLBACK[frame] || [frame]) if (F[f]) return [lk, f, F[f]]; return F.idle ? [lk, "idle", F.idle] : null; }
@@ -3819,10 +3809,14 @@ function portrait(c){
   PORTRAITS.set(key, url);
   return url;
 }
+// the frame for what they are doing (a station's pose, fights and walking are chosen in drawCrew)
 function crewFrame(c){
-  if (c.act === "walk") return Math.floor((c.walkT || 0)*6) % 2 ? "walk1" : "walk2";
-  if (c.act === "fight") return (S.t*5 | 0) % 2 ? "fight" : "idle";
-  if (c.act === "repair" || c.act === "fire" || c.act === "seal") return (S.t*4 | 0) % 2 ? "work" : "idle";
+  const t = S ? S.t : 0, seed = (c.seed % 97)/97;
+  // hands busy at the machine: the base's repair pose if it has one; else its two console frames in turn, unless one of
+  // them is the painting's own figure at a station (a different view: the engineer's op1 is from behind), then the other one alone
+  const work = crewHas(c, "repair") ? ["repair", "repair"] : crewPainted(c, "op1") && crewHas(c, "op2") ? ["op2", "op2"] : crewPainted(c, "op2") ? ["op1", "op1"] : ["op1", "op2"];
+  if (c.act === "repair" || c.act === "seal") return ((t*3 + seed) % 1) < 0.5 ? work[0] : work[1];
+  if (c.act === "fire") return ((t*2.2 + seed) % 1) < 0.6 ? work[0] : work[1];
   return "idle";
 }
 // Crew at the ship's scale (Michael, 2026-10-04): a crew member stands on one floor tile and is about one tile
@@ -3830,7 +3824,13 @@ function crewFrame(c){
 // procedural over the sheet's four poses (docs/LIGHTING.md 5-6): a step bob while walking, facing the way they
 // walk, leaning in to the machine they man, glancing about when idle; fights pair up face to face with a lunge,
 // a white flash and a shove on each blow, sparks; a fall and fade on death; a light column when boarders beam in.
-const WHITE_SPR = new WeakMap();
+const WHITE_SPR = new WeakMap(), TIPS_SPR = new WeakMap();
+// the top of a figure (a queen's antenna tips): its leftmost and rightmost opaque pixels in the top rows, as cell fractions
+function spriteTips(spr){ let r = TIPS_SPR.get(spr); if (r) return r;
+  const w = spr.width, h = spr.height, d = spr.getContext("2d").getImageData(0, 0, w, h).data; let top = -1;
+  for (let y = 0; y < h && top < 0; y++) for (let x = 0; x < w; x++) if (d[(y*w + x)*4 + 3] > 120){ top = y; break; }
+  let x0 = w, x1 = 0; for (let y = Math.max(0, top); y < Math.min(h, top + Math.round(h*0.04)); y++) for (let x = 0; x < w; x++) if (d[(y*w + x)*4 + 3] > 120){ x0 = Math.min(x0, x); x1 = Math.max(x1, x); }
+  r = top < 0 ? {x: 0.5, y: 0.1, x0: 0.5, x1: 0.5} : {x: (x0 + x1)/2/w, y: (top + h*0.02)/h, x0: x0/w, x1: x1/w}; TIPS_SPR.set(spr, r); return r; }
 function whiteOf(spr){ let w = WHITE_SPR.get(spr); if (w) return w;
   w = document.createElement("canvas"); w.width = spr.width; w.height = spr.height; const g = w.getContext("2d");
   g.drawImage(spr, 0, 0); g.globalCompositeOperation = "source-in"; g.fillStyle = "#fff"; g.fillRect(0, 0, w.width, w.height); WHITE_SPR.set(spr, w); return w; }
@@ -3845,28 +3845,43 @@ function drawCrew(ship, g){
     if (c._fight !== S){ c._fight = S; c._tpAt = S.t > 0.5 && c.hp > 0 ? now : 0; c._deadAt = c.hp > 0 ? 0 : -1e9; } // new aboard mid-fight: they beamed in
     if (c.hp <= 0 && !c._deadAt) c._deadAt = now;
     if (c.hp <= 0 && now - c._deadAt > 1600) continue;
+    if (c.hp > 0){ const nv = shipNav(ship); if (c._navKey !== nv.key) crewPlace(ship, c, nv); } // the ship's walk graph just changed (its painting finished loading): stand them at their posts on it
     if (!ship.you && c.side !== "you" && !seeFoe()) continue; // sensors down: their crew are dark
     const p = crewPx(c), mine = c.side === "you";
-    if (p.hidden) continue;
-    const feet = p.y + cs*0.31, Z = cs*1.02, dead = c.hp <= 0;
+    if (p.hidden) continue; // climbing a hatch, out of sight
+    const v2 = !!crewLookId(c), feet = p.y + cs*0.31, dead = c.hp <= 0, seed = (c.seed % 97)/97;
+    // one scale for everyone on a painted ship (CONVENTIONS 4b: a standing human is 2.11 tiles): the older atlas figures fill
+    // 0.945 of their cell, the crew_v2 ones 0.6, so the atlas is drawn smaller there
+    const Z = cs*1.02*(!v2 && sh && sh.kd && sh.kd.painted && CREW_ATLAS.naturalWidth ? 0.6/0.945 : 1);
+    // walking: the frames advance with the ground covered, so the feet don't slide; a slight bob on each step; they face the way they walk
+    const lp = c._lp; c._lp = {x: p.x, y: feet, s: ship.key};
+    if (c.act === "walk"){ if (lp && lp.s === ship.key) c._wd = (c._wd || 0) + Math.min(Math.hypot(p.x - lp.x, feet - lp.y), Z*0.3);
+      const fx = Math.cos(c.face || 0); if (fx < -0.3) c._left = true; else if (fx > 0.3) c._left = false; }
+    const cyc = (((c._wd || 0)/(cs*1.02*(c.species === "myrm" ? 0.6 : 0.44))) % 1 + 1) % 1; // one cycle = two steps of the art's stride
+    if (c._hpSeen != null && c.hp < c._hpSeen - 1.5) c._hurtAt = now; c._hpSeen = c.hp; // a real blow (not the slow burn of fire or thin air)
     const st = !dead && sh && typeof kitStation === "function" ? kitStation(ship, c) : null; // at a station: its spot, facing and pose
-    const opF = st ? (st.pose === "sit" ? "sit" : st.pose === "link" && c.mindLink ? "link" : crewPainted(c, "op1") ? "op1" : ((t*2.5 + c.seed) | 0) % 2 ? "op1" : "op2") : null; // a station's pose
+    const opBeat = ((t*1.4 + seed*3.1) % 1) < 0.7; // working a console: hands moving now and then, never a frozen frame
+    const opF = st ? (st.pose === "sit" ? "sit" : st.pose === "link" && c.mindLink ? "link" : crewPainted(c, "op1") ? "op1" : opBeat ? "op1" : "op2") : null; // a station's pose
     const asPainted = !!(opF && crewPainted(c, opF)); // the painting's own figure at its own station: exactly as painted
-    let strike = false, ox = 0, oy = 0, flip = asPainted ? false : st ? Math.cos(st.face*Math.PI/180) < -0.2 : Math.cos(c.face || 0) < -0.2;
-    // fighting: pair up face to face (never on one spot), lunge on the blow, the other flashes and is shoved
-    const foe = !dead && c.act === "fight" ? allCrew().find(o => o.on === c.on && o.hp > 0 && o.side !== c.side && o.room === c.room && o.gx != null) : null;
-    if (foe){ const dx = foe.gx - c.gx, dir = dx > 0.05 ? 1 : dx < -0.05 ? -1 : (mine ? -1 : 1); flip = dir < 0;
-      if (Math.abs(dx) < 0.6 && Math.abs(foe.gy - c.gy) < 0.35) ox += (((c.gx + foe.gx)/2 - dir*0.26) - c.gx)*cs*(ship.you ? 1 : -1); // a pair shares the space between them: face to face, apart
+    let strike = false, ox = 0, oy = 0, flip = asPainted ? false : st ? Math.cos(st.face*Math.PI/180) < -0.2 : !!c._left;
+    // fighting: face the one they squared up to (navTarget stages the pair face to face), lunge on the blow; the other flashes and is shoved
+    const foe = !dead && c.act === "fight" ? ((c._foe && c._foe.hp > 0 && c._foe.on === c.on && c._foe.room === c.room && c._foe.gx != null) ? c._foe : allCrew().find(o => o.on === c.on && o.hp > 0 && o.side !== c.side && o.room === c.room && o.gx != null)) : null;
+    if (foe){ const fp = crewPx(foe), dir = fp.x > p.x + 0.5 ? 1 : fp.x < p.x - 0.5 ? -1 : (mine ? -1 : 1); flip = dir < 0;
       const per = 0.6 + (c.seed % 7)*0.02, ph = ((t + (c.seed % 100)/37) % per)/per;
       if (ph < 0.18 && live){ strike = true; ox += dir*cs*0.09*Math.sin(ph/0.18*Math.PI); if (live && !c._struck){ c._struck = true; foe._flashAt = now; foe._kb = dir;
         for (let i = 0; i < 4; i++) S.parts.push({x: p.x + dir*cs*0.25, y: feet - cs*0.55 + rnd(-cs*0.1, cs*0.1), vx: dir*rnd(20, 70), vy: rnd(-50, 20), life: 0.2, col: foe.species === "myrm" ? "#9dff6b" : "#ffd28a", s: 1.6}); } }
       else c._struck = false; }
-    if (c._flashAt && now - c._flashAt < 160) ox += (c._kb || 0)*cs*0.06*(1 - (now - c._flashAt)/160);
-    // walking: a step bob, faster with a quicker pace; manning: lean in to the machine
-    if (c.act === "walk"){ oy -= Math.abs(Math.sin((c.walkT || 0)*Math.PI*3))*cs*0.045; }
-    else if (st){ if (st.pose === "stand" && !asPainted){ ox += Math.cos(st.face*Math.PI/180)*cs*0.04; oy += Math.sin(t*7 + c.seed)*cs*0.008; } } // working: leaning in, hands busy
+    if (c._flashAt && now - c._flashAt < 160) ox += (c._kb || 0)*cs*0.06*(1 - (now - c._flashAt)/160); // knocked back a little by the blow
+    const hurt = !dead && !st && !strike && ((c._flashAt && now - c._flashAt < 150) || (c._hurtAt && now - c._hurtAt < 260)) && crewHas(c, "hurt"); // flinching from a blow
+    // repairing or fighting fire: turn to the machine
+    const kt0 = sh && sh.kit[c.room], ca1 = sh && cutArt(ship);
+    if (!dead && !st && (c.act === "repair" || c.act === "seal") && kt0 && kt0.mach && ca1){ const mx = ca1.x + (kt0.mach[0] + kt0.mach[2]/2)*ca1.s; if (Math.abs(mx - p.x) > cs*0.1) flip = mx < p.x; }
+    if (c.act === "walk"){ oy -= Math.abs(Math.sin(cyc*Math.PI*2))*Z*0.014; }
+    else if (!dead && !st && (c.act === "repair" || c.act === "seal" || c.act === "fire")){ ox += (flip ? -1 : 1)*Math.max(0, Math.sin(t*9 + seed*6))*Z*0.012; oy += Math.abs(Math.sin(t*9 + seed*6))*Z*0.006; } // working at it
+    else if (st){ if (st.pose === "stand" && !asPainted){ ox += Math.cos(st.face*Math.PI/180)*cs*0.04; } } // working: leaning in
     else if (!dead && c.act === "man" && sh){ const kt = sh.kit[c.room]; if (kt && kt.gc){ const dx = (kt.gc[0] - c.gx)*(ship.you ? 1 : -1); if (Math.abs(dx) > 0.2){ ox += Math.sign(dx)*cs*0.07; flip = dx < 0; } oy += Math.sin(t*9 + c.seed)*cs*0.006; } }
     else if (!dead && c.act === "idle" && Math.sin(t*0.7 + (c.seed % 13)) > 0.93) flip = !flip; // a glance about
+    const breath = !dead && (st || c.act === "idle" || c.act === "man") ? 1 + 0.012*Math.sin(t*2.3 + seed*6.3) : 1; // the operating loop: they breathe, they don't freeze
     // soft shadow, away from the room's light on a kit ship
     const so = sh ? kitShadow(ship, c, cs, p) : [cs*0.06, cs*0.05], lift = Math.max(0, -oy/cs);
     if (!asPainted){ X.save(); X.globalAlpha = dead ? Math.max(0, 1 - (now - c._deadAt)/1600) : 1 - lift*4; // (a painted figure brings its own shadow)
@@ -3874,7 +3889,10 @@ function drawCrew(ship, g){
     if (!mine && !dead){ X.strokeStyle = "rgba(255,90,70,.85)"; X.lineWidth = 2; X.beginPath(); X.ellipse(p.x, feet - cs*0.02, cs*0.3, cs*0.11, 0, 0, 6.283); X.stroke(); } // their crew: a red ring at the feet
     if (SP(c).powers && !dead){ const gl = X.createRadialGradient(p.x, feet - cs*0.5, 0, p.x, feet - cs*0.5, cs*0.7); gl.addColorStop(0, "rgba(255,240,170,.4)"); gl.addColorStop(1, "rgba(255,240,170,0)"); X.fillStyle = gl; X.fillRect(p.x - cs, feet - cs*1.2, cs*2, cs*1.4); }
     if (mine && S.selC === S.you.crew.indexOf(c)){ X.strokeStyle = "#ffc857"; X.lineWidth = 2; X.beginPath(); X.ellipse(p.x, feet - cs*0.02, cs*0.34, cs*0.12, 0, 0, 6.283); X.stroke(); }
-    const spr =crewSprite(c, dead ? (crewHas(c, "down") ? "down" : "idle") : foe ? (strike ? "fight" : "idle") : opF || crewFrame(c)); // a fighter strikes in the lunge, stands guard between
+    const walkF = v2 ? ["walk1", "walk2", "walk3", "walk4"][Math.floor(cyc*4) % 4] : ["walk1", "walk2"][Math.floor(cyc*2) % 2];
+    const frame = dead ? (crewHas(c, "down") ? "down" : "idle") : hurt ? "hurt" : foe ? (strike ? "fight" : "idle") : opF || (c.act === "walk" ? walkF : crewFrame(c)); // a fighter strikes in the lunge, stands guard between
+    const spr = crewSprite(c, frame);
+    c._frame = frame; c._flip = flip; // (read by the frame-strip QA)
     X.save(); X.imageSmoothingEnabled = true; X.imageSmoothingQuality = "high"; // the 128 px figures are drawn smaller: smooth, not jagged
     if (c.grief > 0) X.globalAlpha = 0.8;
     const tp = c._tpAt ? (now - c._tpAt)/450 : 1; // beaming in: a light column, the figure revealed top down
@@ -3883,25 +3901,30 @@ function drawCrew(ship, g){
     if (dead){ const k = Math.min(1, (now - c._deadAt)/300); X.globalAlpha = Math.max(0, 1 - Math.max(0, now - c._deadAt - 700)/900);
       if (crewHas(c, "down")){ X.translate(p.x, feet); if (flip) X.scale(-1, 1); X.drawImage(spr, -Z/2, -Z*0.97, Z, Z); } // the sheet's own fall
       else { X.translate(p.x, feet - cs*0.1); X.rotate((flip ? -1 : 1)*k*Math.PI/2); X.translate(0, -Z*0.45); if (flip) X.scale(-1, 1); X.drawImage(spr, -Z/2, -Z*0.52, Z, Z); } }
-    else if (asPainted){ X.translate(p.x, feet); X.drawImage(spr, -Z/2, -Z*0.97, Z, Z); }
-    else if (opF === "sit" && crewHas(c, "sit")){ X.translate(p.x, feet - Z*0.42); X.rotate((st.face + 90)*Math.PI/180); X.drawImage(spr, -Z/2, -Z/2, Z, Z); } // seated, seen from behind, turned the way the seat faces
-    else if (spr.square){ X.translate(p.x + ox, feet + oy); if (flip) X.scale(-1, 1); X.drawImage(spr, -Z/2, -Z*0.97, Z, Z);
-      if (c._flashAt && now - c._flashAt < 90){ X.globalAlpha = 0.6; X.drawImage(whiteOf(spr), -Z/2, -Z*0.97, Z, Z); } }
+    else if (asPainted){ X.translate(p.x, feet); X.scale(1, breath); X.drawImage(spr, -Z/2, -Z*0.97, Z, Z); }
+    else if (opF === "sit" && crewHas(c, "sit")){ X.translate(p.x, feet - Z*0.42); X.rotate((st.face + 90)*Math.PI/180); X.scale(1, breath); X.drawImage(spr, -Z/2, -Z/2, Z, Z); } // seated, seen from behind, turned the way the seat faces
+    else if (spr.square){ X.translate(p.x + ox, feet + oy); if (flip) X.scale(-1, 1); X.scale(1, breath); X.drawImage(spr, -Z/2, -Z*0.97, Z, Z);
+      if (c._flashAt && now - c._flashAt < 90){ X.globalAlpha = 0.35; X.drawImage(whiteOf(spr), -Z/2, -Z*0.97, Z, Z); } }
     else { const w = cs*0.7, hh = cs*0.92; X.translate(p.x + ox, feet + oy); if (flip) X.scale(-1, 1); X.drawImage(spr, -w/2, -hh, w, hh);
-      if (c._flashAt && now - c._flashAt < 90){ X.globalAlpha = 0.6; X.drawImage(whiteOf(spr), -w/2, -hh, w, hh); } }
+      if (c._flashAt && now - c._flashAt < 90){ X.globalAlpha = 0.35; X.drawImage(whiteOf(spr), -w/2, -hh, w, hh); } }
     X.restore();
     if (dead) continue;
-    if (c.mindLink && c.act === "man" && sh){ const kt = sh.kit[c.room], ca = cutArt(ship); // the queen works the console by mind: a violet thread to it
-      if (kt && kt.mach && ca){ const mx = ca.x + (kt.mach[0] + kt.mach[2]/2)*ca.s, my = ca.y + (kt.mach[1] + kt.mach[3]/2)*ca.s, hy = feet - cs*0.8;
-        X.save(); X.globalCompositeOperation = "lighter"; X.strokeStyle = `rgba(200,150,255,${0.6 + 0.3*Math.sin(t*4 + c.seed)})`; X.lineWidth = Math.max(1.5, cs*0.05); X.setLineDash([cs*0.06, cs*0.05]); X.lineDashOffset = -t*cs*0.3;
-        X.beginPath(); X.moveTo(p.x + ox, hy); X.quadraticCurveTo((p.x + mx)/2, Math.min(hy, my) - cs*0.35, mx, my); X.stroke(); X.restore(); } }
+    if (c.mindLink && c.act === "man" && sh && opF === "link"){ const kt = sh.kit[c.room], ca = cutArt(ship); // the queen works the console by mind: antennae aglow, a violet thread to it
+      const tip = spriteTips(spr), pulse = 0.6 + 0.3*Math.sin(t*4 + c.seed), hx = p.x + (tip.x - 0.5)*Z, hy = feet - (0.97 - tip.y)*Z;
+      X.save(); X.globalCompositeOperation = "lighter";
+      for (const ax of [tip.x0, tip.x1]){ const gx = p.x + (ax - 0.5)*Z, r = cs*0.16*(0.8 + 0.3*pulse), gl = X.createRadialGradient(gx, hy, 0, gx, hy, r);
+        gl.addColorStop(0, `rgba(225,190,255,${0.8*pulse})`); gl.addColorStop(1, "rgba(200,150,255,0)"); X.fillStyle = gl; X.fillRect(gx - r, hy - r, r*2, r*2); }
+      if (kt && kt.mach && ca){ const mx = ca.x + (kt.mach[0] + kt.mach[2]/2)*ca.s, my = ca.y + (kt.mach[1] + kt.mach[3]/2)*ca.s;
+        X.strokeStyle = `rgba(200,150,255,${pulse})`; X.lineWidth = Math.max(1.5, cs*0.05); X.setLineDash([cs*0.06, cs*0.05]); X.lineDashOffset = -t*cs*0.3;
+        X.beginPath(); X.moveTo(hx, hy); X.quadraticCurveTo((hx + mx)/2, Math.min(hy, my) - cs*0.35, mx, my); X.stroke(); }
+      X.restore(); }
     const bw = cs*0.5, by = feet + 2; // health shows on the hurt and the fighting
     if (c.hp < c.maxHp || c.act === "fight"){ X.fillStyle = "#26324a"; X.fillRect(p.x - bw/2, by, bw, 2.5);
       X.fillStyle = c.hp/c.maxHp > .5 ? "#7cf29a" : "#ff6b4a"; X.fillRect(p.x - bw/2, by, bw*clamp(c.hp/c.maxHp,0,1), 2.5); }
     if (c.fix > 0){ X.fillStyle = "#ffc857"; X.fillRect(p.x - bw/2, feet - cs*0.98, bw*c.fix, 2.5); }
     if (mine && S.selC === S.you.crew.indexOf(c)){ X.font = `600 9px "Chakra Petch", sans-serif`; X.textAlign = "center"; X.textBaseline = "top"; X.fillStyle = "rgba(217,226,242,.85)"; X.fillText(c.name, p.x, by + 4); X.textAlign = "left"; }
     if (live){
-      if (c.act === "repair" && Math.random() < 0.25) S.parts.push({x:p.x + rnd(-4,4), y:feet - cs*0.5, vx:rnd(-30,30), vy:rnd(-40,-10), life:.25, col:"#ffe08a", s:1.5});
+      if ((c.act === "repair" || c.act === "seal") && Math.random() < 0.45){ const hx = p.x + (flip ? -1 : 1)*Z*0.16; for (let i = 0; i < 2; i++) S.parts.push({x: hx + rnd(-2, 2), y: feet - Z*0.3 + rnd(-2, 2), vx: (flip ? -1 : 1)*rnd(10, 50), vy: rnd(-60, -10), life: rnd(.15, .3), col: pick(["#fff6c8", "#ffe08a", "#ffffff"]), s: 1.5}); } // sparks off the work at their hands
       if (c.act === "fire" && Math.random() < 0.6) S.parts.push({x:p.x, y:feet - cs*0.5, vx:Math.cos(c.face||0)*60 + rnd(-15,15), vy:rnd(-20,20), life:.35, col:"#e8f4ff", s:2});
     }
   }
@@ -4004,8 +4027,9 @@ function buildKitPainted(ship, kd, hs, R){
   // the standard (MOD.standard) in this painting's pixels: R.tile is one door opening; crew size follows from it
   const std = MOD.standard || DEFAULT_MOD.standard, tile = R.tile, fig = (CREW2.idx && CREW2.idx.fig) || 0.6;
   kd = {...kd, crew: std.crew.height*tile/(fig*1.02)}; // the crew cell, so a standing human is std.crew.height tiles
-  const fx = v => flip ? w - v : v, rooms = {}, paths = {}, bbs = {}, kit = {}, cell = tile*2.5;
+  const fx = v => flip ? w - v : v, rooms = {}, paths = {}, bbs = {}, kit = {}, cell = tile*2.5, polys = {};
   for (const q of ship.layout){ const r = R.rooms[q.id]; if (!r) continue;
+    polys[q.id] = r.poly.map(([px, py]) => [fx(px), py]); // the traced outline, for the crew's walk graph (src/crewnav.js)
     const pth = new Path2D(); r.poly.forEach(([px, py], i) => i ? pth.lineTo(fx(px), py) : pth.moveTo(fx(px), py)); pth.closePath(); paths[q.id] = pth;
     const xs = r.poly.map(p => fx(p[0])), ys = r.poly.map(p => p[1]); bbs[q.id] = [Math.min(...xs), Math.min(...ys), Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)];
     rooms[q.id] = [flip ? w - r.walk[0] - r.walk[2] : r.walk[0], r.walk[1], r.walk[2], r.walk[3]];
@@ -4027,13 +4051,17 @@ function buildKitPainted(ship, kd, hs, R){
   // the hull's right edge on every row (layout keeps it clear of the swap window)
   const al = x.getImageData(0, 0, w, h).data, rowR = new Float32Array(h);
   for (let yy = 0; yy < h; yy++){ let r = -1; for (let xx = w - 1; xx >= 0; xx--) if (al[(yy*w + xx)*4 + 3] > 60){ r = xx; break; } rowR[yy] = r; }
-  return {c, w, h, ready: true, rooms, paths, bbs, kit, cell, hb, doors, rowR, kd: {painted: true, crew: kd.crew, tile, flip, w, cell}, nest: R.nest};
+  const hatches = (R.hatches || []).filter(t => polys[t.a] && polys[t.b]).map(t => ({a: t.a, b: t.b, x: fx(t.x)}));
+  return {c, w, h, ready: true, rooms, paths, bbs, kit, cell, hb, doors, rowR, polys, hatches, kd: {painted: true, crew: kd.crew, tile, flip, w, cell}, nest: R.nest};
 }
-// the station a crew member snaps to while working a machine: the first crew member who can work it
+// the station a crew member is working at: whoever holds it (src/crewnav.js navHolder, the first crew member headed
+// there who can work it), once they have walked onto its spot and stopped (idle at their post when a fight opens paused)
 function kitStation(ship, c){
-  const sh = ship.cut && ship.cut.kit && SHAPED[ship.cut.art], kt = sh && sh.kit[c.room]; if (!kt || !kt.station || !(c.act === "man" || (c.act === "idle" && ship.sys[c.room])) || c.room !== c.dest) return null; // (idle at their post when a fight opens paused)
-  const first = allCrew().find(o => o.on === ship.key && o.room === c.room && o.dest === c.room && o.hp > 0 && o.side === ship.key && canMan(o));
-  return first === c ? kt.station : null;
+  const sh = ship.cut && ship.cut.kit && SHAPED[ship.cut.art], kt = sh && sh.kit[c.room]; if (!kt || !kt.station || !(c.act === "man" || (c.act === "idle" && ship.sys[c.room])) || c.room !== c.dest) return null;
+  if (navHolder(ship, c.room) !== c) return null;
+  const nav = shipNav(ship), R = nav.rooms[c.room];
+  if (nav.painted && (c._navKey !== nav.key || !R || !R.station || Math.hypot(c.gx - R.station.x, c.gy - R.station.y) > 0.08)) return null;
+  return kt.station;
 }
 // doors on every wall two rooms share (crewGraph's rule: the middle of the shared span), plus airlocks
 function kitDoors(L, kd){
@@ -4203,7 +4231,7 @@ function kitLitPass(ship, dt){
 }
 // where a crew member's shadow falls: away from their room's machine light when it's on, otherwise down-right
 function kitShadow(ship, c, cell, p){ // p: where the crew member stands on screen
-  const sh = ship.cut && ship.cut.kit && SHAPED[ship.cut.art], r = sh && room(ship, roomAtGrid(ship, c.gx, c.gy)), kt = r && sh.kit[r.id], ca = sh && cutArt(ship);
+  const sh = ship.cut && ship.cut.kit && SHAPED[ship.cut.art], r = sh && room(ship, crewRoomNow(ship, c)), kt = r && sh.kit[r.id], ca = sh && cutArt(ship);
   const lp = (ship._lp || {})[r && r.id] || 0;
   if (!kt || !kt.mach || !ca || !(lp > 0.1)) return [cell*0.06, cell*0.05];
   const dx = p.x - (ca.x + (kt.mach[0] + kt.mach[2]/2)*ca.s), dy = p.y - (ca.y + (kt.mach[1] + kt.mach[3]/2)*ca.s), d = Math.hypot(dx, dy) || 1;
@@ -4227,11 +4255,9 @@ function kitDoorsDraw(ship){
   const cs = sh.kd.cell*ca.s, Wd = cs*0.62, D = cs*0.24, crew = typeof allCrew === "function" ? allCrew().filter(c => c.on === ship.key && c.hp > 0 && c.gx != null) : [];
   const now = performance.now();
   if ((sh.kd && sh.kd.painted)){ // the painting's own doors: closed as painted; open, the two leaves slide into the jambs and the floor shows through
-    const pos = crew.filter(c => c.act === "walk" || c.room !== c.dest).map(c => crewPx(c)), reach = sh.kd.tile*ca.s*0.7;
+    sh.doors.forEach((d, i) => { d.o = navDoorOpen(ship, i); }); // the walk graph opens a door ahead of whoever walks through it, and shuts it behind them
     for (const d of sh.doors){ const [rx, ry, rw, rh] = d.rect, sx = ca.x + rx*ca.s, sy = ca.y + ry*ca.s, sw = rw*ca.s, shh = rh*ca.s;
-      const vent = ship.vent && (ship.vent[d.a] || ship.vent[d.b]);
-      const near = !vent && pos.some(p => p.x > sx - reach && p.x < sx + sw + reach && p.y > sy - reach && p.y < sy + shh + reach*1.6);
-      d.o = (d.o || 0) + ((near ? 1 : 0) - (d.o || 0))*0.25; if (d.o < 0.03) continue; // shut: the painting shows it
+      if (d.o < 0.03) continue; // shut: the painting shows it
       const o = d.o*0.8, A = d.art;
       X.save(); X.beginPath(); X.rect(sx, sy, sw, shh); X.clip();
       // the floor beyond the door, from the painting beside it (left of a vertical door, above a horizontal one)
@@ -4276,6 +4302,227 @@ function kitPreview(cv, def){
     x.drawImage(M.im, (kitTier(q.id, sy.level) - 1)*T, kt.row*T, T, T, -pw/2, -pw/2, pw, pw); x.restore(); }
   return true;
 }
+
+/* ---------------- crew paths: a walk graph per ship (2026-10-04) ----------------
+   Michael (played on his iPhone): "they need a specific path around the ship because they are walking through
+   walls." Crew used to walk the layout grid while the painting drew them inside its own room outlines, so a step
+   across a grid door could land anywhere on the painting, through a painted wall. Now every ship has a walk graph
+   built from the rooms as drawn (docs/CONVENTIONS.md 4b):
+     - a room's floor: inside its traced outline (kept a little off the walls) and inside the area crew stand in;
+       floor waypoints on a half-tile lattice, its station spot, and each door's inner threshold;
+     - a door: the only way between two rooms, threshold to threshold straight through its opening;
+     - inside a room crew walk straight only where the whole line stays on the floor, otherwise along waypoints;
+     - A* over that graph picks the way; a door opens ahead of whoever is about to use it and shuts behind them.
+   A painted ship (the Kestrel) uses its traced outlines, painted doors and stations (art/hull_*.json, cut by
+   tools/ship_kit.py PAINTED); any other ship uses its grid rooms and the doors crewGraph puts in every shared
+   wall. Boarders and enemy crew walk by the same rules on whichever ship they are on.
+   Crew positions (c.gx, c.gy) are in the walk graph's units: grid cells on a grid ship, standard tiles on a
+   painted one (its painting's pixels / tile), feet on the floor point. c._navKey says which graph they are in. */
+const NAV = new Map(), NAV_DOORS = new WeakMap();
+function navPaintedShape(ship){ const sh = ship && ship.cut && ship.cut.kit && SHAPED[ship.cut.art]; return sh && sh.kd && sh.kd.painted && sh.polys ? sh : null; }
+function shipNav(ship){
+  const sh = navPaintedShape(ship);
+  const key = sh ? "p:" + ship.cut.art : "g:" + (ship.you ? "y|" : "f|") + ship.layout.map(q => `${q.id}@${q.x},${q.y},${q.w},${q.h}`).join("|");
+  let nav = NAV.get(key); if (nav) return nav;
+  nav = sh ? navFromPainted(ship, sh, key) : navFromGrid(ship, key);
+  NAV.set(key, nav); return nav;
+}
+// the painted ship: outlines, walk areas, doors, stations and hatches, in tiles (the painting's px / its tile)
+function navFromPainted(ship, sh, key){
+  const T = sh.kd.tile, k = 1/T, E = 0.2, rooms = {};
+  for (const q of ship.layout){ const poly = sh.polys[q.id]; if (!poly) continue;
+    const w = sh.rooms[q.id], st = sh.kit[q.id] && sh.kit[q.id].station;
+    rooms[q.id] = {poly: poly.map(([x, y]) => [x*k, y*k]), walk: [w[0]*k - E, w[1]*k - E, (w[0] + w[2])*k + E, (w[1] + w[3])*k + E],
+      station: st ? {x: st.x*k, y: st.y*k, face: st.face, pose: st.pose} : null}; }
+  const doors = (sh.doors || []).map((d, i) => ({a: d.a, b: d.b, vert: d.vert, rect: d.rect.map(v => v*k), src: i}));
+  const hatches = (sh.hatches || []).map(h => ({a: h.a, b: h.b, x: h.x*k}));
+  return navBuild({key, painted: true, rooms, doors, hatches, margin: 0.12, step: 0.5, spot: 1.0, fight: 0.55});
+}
+// a grid ship: its rooms are the grid rects, its doors the middle of every shared wall (crewGraph's rule)
+function navFromGrid(ship, key){
+  const rooms = {}, doors = [], G_ = crewGraph(ship), seen = new Set();
+  for (const q of ship.layout) rooms[q.id] = {poly: [[q.x, q.y], [q.x + q.w, q.y], [q.x + q.w, q.y + q.h], [q.x, q.y + q.h]],
+    walk: [q.x + 0.2, q.y + 0.25, q.x + q.w - 0.2, q.y + q.h - 0.3], station: null,
+    spots: [...Array(q.w*q.h).keys()].map(k => [q.x + (k % q.w) + 0.5, q.y + Math.floor(k/q.w) + 0.62])}; // one crew member to a square, as in FTL
+  for (const [a, list] of Object.entries(G_.adj)) for (const e of list){ const id = [a, e.to].sort().join("|"); if (seen.has(id)) continue; seen.add(id);
+    if (e.kind === "door"){ const A = room(ship, a), B = room(ship, e.to), p = e.pts[0], vert = A.x + A.w === B.x || B.x + B.w === A.x;
+      doors.push({a, b: e.to, vert, rect: vert ? [p.x - 0.06, p.y - 0.3, 0.12, 0.6] : [p.x - 0.3, p.y - 0.06, 0.6, 0.12]}); } }
+  return navBuild({key, painted: false, rooms, doors, hatches: [], margin: 0.12, step: 0.5, spot: 0.9, fight: 0.3});
+}
+// ---- geometry
+function navInPoly(P, x, y){ let in_ = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++){ const [xi, yi] = P[i], [xj, yj] = P[j];
+  if ((yi > y) !== (yj > y) && x < (xj - xi)*(y - yi)/(yj - yi) + xi) in_ = !in_; } return in_; }
+function navEdgeDist(P, x, y){ let best = Infinity; for (let i = 0, j = P.length - 1; i < P.length; j = i++){ const [ax, ay] = P[j], [bx, by] = P[i], dx = bx - ax, dy = by - ay, L = dx*dx + dy*dy;
+  const t = L ? clamp(((x - ax)*dx + (y - ay)*dy)/L, 0, 1) : 0; best = Math.min(best, Math.hypot(x - ax - t*dx, y - ay - t*dy)); } return best; }
+// on a room's floor: inside its outline, off its walls, inside where crew stand
+function navFloor(nav, R, x, y){ const w = R.walk; return x >= w[0] && x <= w[2] && y >= w[1] && y <= w[3] && navInPoly(R.poly, x, y) && navEdgeDist(R.poly, x, y) >= nav.m &&
+  !nav.block.some(b => x > b[0] && x < b[2] && y > b[1] && y < b[3]); } // nobody stands in a doorway: a door is for walking through
+// inside a room's outline at all (a station can sit right on its wall line, as painted)
+function navInRoom(R, x, y){ return navInPoly(R.poly, x, y) || navEdgeDist(R.poly, x, y) <= 0.03; }
+function navSeg(nav, R, ax, ay, bx, by, test){ const L = Math.hypot(bx - ax, by - ay), n = Math.max(1, Math.ceil(L/0.08));
+  for (let i = 0; i <= n; i++){ const t = i/n; if (!test(nav, R, ax + (bx - ax)*t, ay + (by - ay)*t)) return false; } return true; }
+const navFloorTest = (nav, R, x, y) => navFloor(nav, R, x, y), navRoomTest = (nav, R, x, y) => navInRoom(R, x, y);
+// can a walker go straight from a to b inside room R? (a station is reached by a short step that only has to stay inside the room)
+function navSees(nav, R, a, b){
+  if (a.kind === "station" || b.kind === "station" || a.loose || b.loose) return Math.hypot(b.x - a.x, b.y - a.y) <= 2.5 && navSeg(nav, R, a.x, a.y, b.x, b.y, navRoomTest);
+  return navSeg(nav, R, a.x, a.y, b.x, b.y, navFloorTest);
+}
+// ---- the graph
+function navBuild(spec){
+  const nav = {key: spec.key, painted: spec.painted, m: spec.margin, fight: spec.fight, rooms: {}, nodes: [], adj: [], doors: [], hatches: [], warn: [],
+    block: spec.doors.map(d => [d.rect[0] - 0.05, d.rect[1] - 0.05, d.rect[0] + d.rect[2] + 0.05, d.rect[1] + d.rect[3] + 0.05])};
+  const addNode = (room, x, y, kind, extra) => { const n = {i: nav.nodes.length, room, x, y, kind, ...(extra || {})}; nav.nodes.push(n); nav.adj.push([]); nav.rooms[room].nodes.push(n.i); return n; };
+  const link = (a, b, w, extra) => { nav.adj[a.i].push({to: b.i, w, ...(extra || {})}); nav.adj[b.i].push({to: a.i, w, ...(extra || {})}); };
+  for (const [id, r] of Object.entries(spec.rooms)){ const R = nav.rooms[id] = {id, poly: r.poly, walk: r.walk, station: r.station, nodes: [], spots: []};
+    const st = spec.step;
+    for (let y = r.walk[1] + st/2; y <= r.walk[3]; y += st) for (let x = r.walk[0] + st/2; x <= r.walk[2]; x += st) if (navFloor(nav, R, x, y)) addNode(id, x, y, "floor");
+    if (!R.nodes.length){ const cx = r.poly.reduce((a, p) => a + p[0], 0)/r.poly.length, cy = r.poly.reduce((a, p) => a + p[1], 0)/r.poly.length; addNode(id, cx, cy, "floor", {loose: true}); nav.warn.push(`${id}: no floor`); }
+    if (r.station) R.stationNode = addNode(id, r.station.x, r.station.y, "station").i;
+    // where crew stand when they are not at the station: spread out, one figure's width apart, nearest the middle first
+    const wc = [(r.walk[0] + r.walk[2])/2, (r.walk[1] + r.walk[3])/2];
+    if (r.spots) R.spots = r.spots.slice();
+    else { const cand = R.nodes.map(i => nav.nodes[i]).filter(n => n.kind === "floor" && !(r.station && Math.hypot(n.x - r.station.x, n.y - r.station.y) < spec.spot*0.9))
+        .sort((a, b) => Math.hypot(a.x - wc[0], a.y - wc[1]) - Math.hypot(b.x - wc[0], b.y - wc[1]));
+      for (const n of cand) if (R.spots.every(s => Math.hypot(s[0] - n.x, s[1] - n.y) >= spec.spot)) R.spots.push([n.x, n.y]);
+      if (!R.spots.length) R.spots.push([nav.nodes[R.nodes[0]].x, nav.nodes[R.nodes[0]].y]); }
+  }
+  // doors: step out of the opening on each side until the foot is on a room's floor; that room is the side's room
+  // (at least a tenth of a tile clear of the door, so whoever waits for it waits outside it)
+  spec.doors.forEach((d, di) => { const [rx, ry, rw, rh] = d.rect, side = [];
+    for (const s of [-1, 1]){ let hit = null;
+      for (let t = 0.1; t <= 1.5 && !hit; t += 0.02) for (const off of [0, 0.1, -0.1, 0.2, -0.2]){ if (hit) break;
+        const x = d.vert ? (s < 0 ? rx - t : rx + rw + t) : rx + rw/2 + off, y = d.vert ? ry + rh/2 + off : (s < 0 ? ry - t : ry + rh + t);
+        for (const R of Object.values(nav.rooms)) if (navFloor(nav, R, x, y)){ hit = {room: R.id, x, y}; break; } }
+      side.push(hit); }
+    if (!side[0] || !side[1] || side[0].room === side[1].room){ nav.warn.push(`door ${d.a}-${d.b}: no floor on both sides`); return; }
+    if (![d.a, d.b].includes(side[0].room) || ![d.a, d.b].includes(side[1].room)) nav.warn.push(`door ${d.a}-${d.b} opens ${side[0].room}-${side[1].room}`);
+    const A = addNode(side[0].room, side[0].x, side[0].y, "door", {door: nav.doors.length}), B = addNode(side[1].room, side[1].x, side[1].y, "door", {door: nav.doors.length});
+    // its opening: as wide as the door, from threshold to threshold (the foot never leaves a room or this)
+    const pass = d.vert ? [A.x, ry, B.x, ry + rh] : [rx, A.y, rx + rw, B.y];
+    nav.doors.push({a: side[0].room, b: side[1].room, na: A.i, nb: B.i, pass, vert: d.vert, rect: d.rect, src: d.src ?? di});
+    link(A, B, Math.hypot(B.x - A.x, B.y - A.y) + 0.15, {door: nav.doors.length - 1}); });
+  // hatches (a ceiling hatch up into a fin with no painted door): the walker climbs out of sight between them
+  for (const h of spec.hatches){ const A = nav.rooms[h.a], B = nav.rooms[h.b]; if (!A || !B) continue;
+    const ys = R => R.poly.map(p => p[1]); let ya = null, yb = null;
+    for (let y = Math.min(...ys(A)); y <= Math.max(...ys(A)) && ya === null; y += 0.02) if (navFloor(nav, A, h.x, y)) ya = y;
+    for (let y = Math.max(...ys(B)); y >= Math.min(...ys(B)) && yb === null; y -= 0.02) if (navFloor(nav, B, h.x, y)) yb = y;
+    if (ya === null || yb === null){ nav.warn.push(`hatch ${h.a}-${h.b}: no floor`); continue; }
+    const na = addNode(h.a, h.x, ya, "hatch", {hatch: nav.hatches.length}), nb = addNode(h.b, h.x, yb, "hatch", {hatch: nav.hatches.length});
+    nav.hatches.push({a: h.a, b: h.b, na: na.i, nb: nb.i}); link(na, nb, Math.abs(yb - ya) + 1, {hatch: nav.hatches.length - 1}); }
+  // inside each room: every pair of waypoints that can see each other along the floor
+  for (const R of Object.values(nav.rooms)){ const ns = R.nodes.map(i => nav.nodes[i]);
+    for (let i = 0; i < ns.length; i++) for (let j = i + 1; j < ns.length; j++){ const a = ns[i], b = ns[j], L = Math.hypot(b.x - a.x, b.y - a.y);
+      if (a.kind === "floor" && b.kind === "floor" && L > 1.6) continue; // the lattice reaches far points in short hops
+      if (navSees(nav, R, a, b)) link(a, b, L); } }
+  // anything left unreachable in its own room is a tracing fault: say so
+  for (const R of Object.values(nav.rooms)){ const seen = new Set([R.nodes[0]]), q = [R.nodes[0]];
+    while (q.length){ const n = q.pop(); for (const e of nav.adj[n]) if (nav.nodes[e.to].room === R.id && !seen.has(e.to)){ seen.add(e.to); q.push(e.to); } }
+    if (seen.size < R.nodes.length) nav.warn.push(`${R.id}: ${R.nodes.length - seen.size} waypoints cut off`); }
+  return nav;
+}
+// which room a point is in (the outline that holds it, else the nearest)
+function navRoomAt(nav, x, y){ let best = null, bd = Infinity;
+  for (const R of Object.values(nav.rooms)){ if (navInPoly(R.poly, x, y)) return R.id; const d = navEdgeDist(R.poly, x, y); if (d < bd){ bd = d; best = R.id; } } return best; }
+// the way from where c stands to a target {x, y, room}: waypoints, each with the room it is in and the door or hatch it crosses
+function navRoute(nav, c, to){
+  const here = {x: c.gx, y: c.gy}, R0 = nav.rooms[c._navRoom] ? c._navRoom : navRoomAt(nav, c.gx, c.gy), RT = nav.rooms[to.room];
+  if (!RT) return null;
+  const start = [], X = c._navX; // mid-crossing: back to either end of that door or hatch
+  if (X && X.door != null && nav.doors[X.door]){ const d = nav.doors[X.door]; for (const n of [d.na, d.nb]) start.push({n, w: Math.hypot(nav.nodes[n].x - here.x, nav.nodes[n].y - here.y), cross: {door: X.door}}); }
+  else if (X && X.hatch != null && nav.hatches[X.hatch]){ const h = nav.hatches[X.hatch]; for (const n of [h.na, h.nb]) start.push({n, w: Math.hypot(nav.nodes[n].x - here.x, nav.nodes[n].y - here.y), cross: {hatch: X.hatch}}); }
+  else { const R = nav.rooms[R0], me = {x: here.x, y: here.y, kind: navFloor(nav, R, here.x, here.y) ? "floor" : "station"};
+    if (R0 === to.room && navSees(nav, R, me, {...to, kind: to.station ? "station" : "floor"})) return [{x: to.x, y: to.y, room: to.room}];
+    for (const i of R.nodes){ const n = nav.nodes[i]; if (navSees(nav, R, me, n)) start.push({n: i, w: Math.hypot(n.x - here.x, n.y - here.y)}); }
+    if (!start.length){ let b = R.nodes[0], bd = Infinity; for (const i of R.nodes){ const n = nav.nodes[i], d = Math.hypot(n.x - here.x, n.y - here.y); if (d < bd){ bd = d; b = i; } } start.push({n: b, w: bd}); } }
+  // the goal: every waypoint in the target room that can see the target
+  const goal = new Map(), tk = {...to, kind: to.station ? "station" : "floor"};
+  for (const i of RT.nodes){ const n = nav.nodes[i]; if (Math.abs(n.x - to.x) < 1e-6 && Math.abs(n.y - to.y) < 1e-6) goal.set(i, 0); else if (navSees(nav, RT, n, tk)) goal.set(i, Math.hypot(n.x - to.x, n.y - to.y)); }
+  if (!goal.size){ let b = RT.nodes[0], bd = Infinity; for (const i of RT.nodes){ const n = nav.nodes[i], d = Math.hypot(n.x - to.x, n.y - to.y); if (d < bd){ bd = d; b = i; } } goal.set(b, bd); }
+  // A*: straight-line distance to the target as the guess
+  const N = nav.nodes.length, g = new Float64Array(N).fill(Infinity), prev = new Int32Array(N).fill(-1), via = new Array(N), done = new Uint8Array(N), open = [];
+  const h = i => Math.hypot(nav.nodes[i].x - to.x, nav.nodes[i].y - to.y);
+  for (const s of start) if (s.w < g[s.n]){ g[s.n] = s.w; via[s.n] = s.cross || null; open.push(s.n); }
+  let best = -1, bestCost = Infinity;
+  while (open.length){ let k = 0; for (let j = 1; j < open.length; j++) if (g[open[j]] + h(open[j]) < g[open[k]] + h(open[k])) k = j;
+    const n = open.splice(k, 1)[0]; if (done[n]) continue; done[n] = 1;
+    if (g[n] + h(n) >= bestCost) break;
+    if (goal.has(n) && g[n] + goal.get(n) < bestCost){ bestCost = g[n] + goal.get(n); best = n; }
+    for (const e of nav.adj[n]){ const c2 = g[n] + e.w; if (c2 < g[e.to]){ g[e.to] = c2; prev[e.to] = n; via[e.to] = e.door != null ? {door: e.door} : e.hatch != null ? {hatch: e.hatch} : null; open.push(e.to); } } }
+  if (best < 0) return null;
+  const pts = []; for (let n = best; n >= 0; n = prev[n]){ const nd = nav.nodes[n], v = via[n]; pts.unshift({x: nd.x, y: nd.y, room: nd.room, ...(v || {})}); }
+  if (Math.hypot(pts[pts.length - 1].x - to.x, pts[pts.length - 1].y - to.y) > 1e-6) pts.push({x: to.x, y: to.y, room: to.room});
+  return pts;
+}
+// ---- where each crew member is headed in their room
+// the station's holder: the first crew member headed here who can work this ship's machine (kitStation's rule)
+function navHolder(ship, rid){
+  const nav = shipNav(ship), R = nav.rooms[rid]; if (!R || !R.station || !ship.sys[rid]) return null;
+  return allCrew().find(o => o.on === ship.key && o.dest === rid && o.hp > 0 && o.side === ship.key && canMan(o)) || null;
+}
+function navNearestFloor(nav, R, x, y){ let b = null, bd = Infinity; for (const i of R.nodes){ const n = nav.nodes[i]; if (n.kind === "station" || n.kind === "hatch") continue; const d = Math.hypot(n.x - x, n.y - y); if (d < bd){ bd = d; b = n; } } return b; }
+function navTarget(ship, c, nav){
+  nav = nav || shipNav(ship);
+  const rid = nav.rooms[c.dest] ? c.dest : Object.keys(nav.rooms)[0], R = nav.rooms[rid];
+  // fighting: whoever is aboard their own ship holds their ground; the ones who came aboard close in on them, face to
+  // face a short reach apart, a second one on the other side, more above and below, each on its own patch of floor
+  const f = c._foe;
+  if (c.side !== ship.key && f && f.hp > 0 && f.on === c.on && f.gx != null && f._navKey === nav.key && c.room === c.dest && f.room === c.room && c.gx != null){
+    const mates = allCrew().filter(o => o._foe === f && o.on === c.on && o.hp > 0 && o.room === c.room && o.side === c.side && o.gx != null), k = Math.max(0, mates.indexOf(c));
+    const d = nav.fight*2, s0 = Math.sign((mates[0] || c).gx - f.gx) || (c.side === "you" ? -1 : 1);
+    const offs = [[s0, 0], [-s0, 0], [s0*0.8, -0.8], [-s0*0.8, -0.8], [s0*0.8, 0.8], [-s0*0.8, 0.8], [s0*1.6, 0], [-s0*1.6, 0]];
+    const taken = []; let pick_ = null;
+    for (let j = 0; j <= k; j++){ let got = null;
+      for (const [ox, oy] of offs){ const tx = Math.round((f.gx + ox*d)*20)/20, ty = Math.round((f.gy + oy*d)*20)/20;
+        if (navFloor(nav, R, tx, ty) && taken.every(t => Math.hypot(t[0] - tx, t[1] - ty) > d*0.6)){ got = [tx, ty]; break; } }
+      if (!got){ const n = navNearestFloor(nav, R, f.gx + s0*d, f.gy); got = n ? [n.x, n.y] : [f.gx, f.gy]; }
+      taken.push(got); if (j === k) pick_ = got; }
+    return {x: pick_[0], y: pick_[1], room: rid, fight: true}; }
+  const holder = navHolder(ship, rid);
+  if (holder === c) return {x: R.station.x, y: R.station.y, room: rid, station: true};
+  const occ = allCrew().filter(o => o.on === c.on && o.dest === rid && o.hp > 0 && o !== holder), i = Math.max(0, occ.indexOf(c));
+  const sp = R.spots, s = sp[i % sp.length], over = Math.floor(i/sp.length); // past capacity: squeeze in beside
+  return {x: s[0] + over*0.22, y: s[1], room: rid};
+}
+// ---- doors: open ahead of whoever is about to walk through, shut a moment after the last has passed
+function navDoors(ship, nav){ let st = NAV_DOORS.get(ship); if (!st || st.key !== nav.key){ st = {key: nav.key, o: new Float32Array(nav.doors.length), hold: new Float32Array(nav.doors.length), want: new Uint8Array(nav.doors.length)}; NAV_DOORS.set(ship, st); } return st; }
+function navDoorsTick(ship, dt){ if (!ship || !ship.layout || ship.env) return; const nav = shipNav(ship), st = navDoors(ship, nav);
+  for (let i = 0; i < st.o.length; i++){ if (st.want[i]){ st.o[i] = Math.min(1, st.o[i] + dt/0.15); st.hold[i] = 0.25; } else if (st.hold[i] > 0) st.hold[i] -= dt; else st.o[i] = Math.max(0, st.o[i] - dt/0.3); st.want[i] = 0; } }
+// how far open a painted door is (by its index in the painting's door list), for the door drawing
+function navDoorOpen(ship, src){ const nav = shipNav(ship), st = NAV_DOORS.get(ship); if (!st || st.key !== nav.key) return 0; const i = nav.doors.findIndex(d => d.src === src); return i < 0 ? 0 : st.o[i]; }
+// ---- one step along the way; returns how far they walked
+function crewPlace(ship, c, nav){ const t = navTarget(ship, c, nav); c.gx = t.x; c.gy = t.y; c._navRoom = t.room; c._navX = null; c._path = null; c._pt = null; c._navKey = nav.key; c.room = c.dest; c._foe = null; }
+function crewMove(ship, c, dt, speed){
+  const nav = shipNav(ship);
+  if (c.gx == null || c._navKey !== nav.key || !nav.rooms[c._navRoom]) crewPlace(ship, c, nav);
+  const t = navTarget(ship, c, nav), pt = c._pt;
+  if (!c._path || !pt || pt.room !== t.room || Math.hypot(t.x - pt.x, t.y - pt.y) > 0.06){ c._path = navRoute(nav, c, t) || []; c._pt = t; }
+  const ds = navDoors(ship, nav);
+  // ask the next door ahead to open while it is still a tile or so off
+  for (let k = 0, run = 0, px = c.gx, py = c.gy; k < c._path.length && run < 1.3; k++){ const w = c._path[k]; run += Math.hypot(w.x - px, w.y - py); px = w.x; py = w.y; if (w.door != null){ ds.want[w.door] = 1; break; } }
+  if (c._navX && c._navX.door != null) ds.want[c._navX.door] = 1;
+  let budget = speed*dt, moved = 0;
+  while (budget > 1e-9 && c._path.length){
+    const w = c._path[0], slow = w.hatch != null ? 0.5 : 1; // climbing a hatch is slower than walking
+    if (w.door != null && !(c._navX && c._navX.door === w.door)){ // at the door: it opens before they step in (a stuck door is forced after half a second)
+      if (ds.o[w.door] < 0.6 && (c._doorWait || 0) < 0.5){ c._doorWait = (c._doorWait || 0) + dt; break; } c._doorWait = 0; }
+    if (w.door != null) c._navX = {door: w.door}; else if (w.hatch != null) c._navX = {hatch: w.hatch};
+    const dx = w.x - c.gx, dy = w.y - c.gy, d = Math.hypot(dx, dy), st = Math.min(d, budget*slow);
+    if (d > 1e-9){ c.gx += dx/d*st; c.gy += dy/d*st; if (w.hatch == null) c.face = Math.atan2(dy, dx); }
+    budget -= st/slow; moved += st;
+    if (st >= d - 1e-9){ c.gx = w.x; c.gy = w.y; c._path.shift(); c._navRoom = w.room; c._navX = null; }
+  }
+  if (c._navRoom === c.dest && !c._navX) c.room = c.dest;
+  c._moved = moved;
+  return moved;
+}
+// where a crew member's feet are on screen: walk-graph units -> the screen
+function navScreen(ship, c, nav){
+  const ca = cutArt(ship), sh = ca && navPaintedShape(ship);
+  if (sh && nav.painted){ const T = sh.kd.tile*ca.s; return {x: ca.x + c.gx*T, y: ca.y + c.gy*T}; }
+  return null;
+}
+// the room c is standing in (their walk graph's room)
+function crewRoomNow(ship, c){ const nav = shipNav(ship); return c._navKey === nav.key && nav.rooms[c._navRoom] ? c._navRoom : roomAtGrid(ship, c.gx, c.gy); }
 
 /* ============================================================
    THE VOYAGE — sector maps, beacons, events, stores, the arc,
