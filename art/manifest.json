@@ -537,6 +537,31 @@
    "index": "kit_machines.json",
    "at": "2026-10-04",
    "source": "Michael's Gemini art (assets-candidates/), cut by tools/ship_kit.py, 2026-10-04: 9 tiers per machine (reactor, shields, weapons, oxygen, medbay, sensors, doors, pilot, teleporter, drones), one 128 px tile each"
+  },
+  {
+   "group": "ships",
+   "id": "hull_raider",
+   "file": "hull_raider.png",
+   "width": 1253,
+   "height": 516,
+   "at": "2026-10-04",
+   "source": "art-approved/08b-enemy-raider-small-empty.png (Michael's yes 2026-10-04), cut by tools/ship_kit.py painted raider: the small sector-1 pirate raider, shown as painted (bow left, as an enemy faces you), half size (one tile = 53.5 px, the Kestrel's)"
+  },
+  {
+   "group": "ships",
+   "id": "hull_raider_hd",
+   "file": "hull_raider_hd.png",
+   "width": 2506,
+   "height": 1032,
+   "at": "2026-10-04",
+   "source": "the same raider at the painting's full size, same crop (tools/ship_kit.py painted-hd raider); loaded only on an iPad or a desktop"
+  },
+  {
+   "group": "kit",
+   "id": "hull_raider_rooms",
+   "index": "hull_raider.json",
+   "at": "2026-10-04",
+   "source": "the raider's traced rooms, walk areas, machine glows, crew stations and its six painted doors (tools/ship_kit.py RAIDER)"
   }
  ]
 }
