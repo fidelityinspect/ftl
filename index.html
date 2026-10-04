@@ -287,7 +287,7 @@ body[data-mode="fight"] .sector{display:none}
 /* sheets and panels: the side-panel frame */
 .sheet{background:rgba(2,6,14,.62)}
 .panel{background:none;border:0;border-image:url(art/ui_frame_panel.png) 56 fill / 16px stretch;border-radius:0;padding:18px 22px}
-body.land .panel{max-height:calc(100% - 16px);max-width:780px}
+body.land .panel{max-height:calc(100% - 36px);max-width:780px} /* 100% less the sheet padding and the panel's own, so a long sheet never runs off the screen */
 body.land .sheet{align-items:center;padding:8px 16px}
 .panel h2{color:#e8f8ff;text-shadow:0 0 12px rgba(63,200,236,.55)}
 .panel h3{color:var(--edge);opacity:.8}
@@ -1508,6 +1508,12 @@ function stepFx(dt){
       if (p.t >= p.dur) p.done = true;
       continue;
     }
+    // the shot meets their shield before the hull: dodge and shields are settled there, so a blocked shot stops
+    // at the bubble with a flash and never reaches the room (FTL: a laser on a shield only pops a layer)
+    if (!p.res && p.t >= p.dur*SHIELD_K){
+      p.res = S.over ? "gone" : screen(p);
+      if (p.res === "blocked" || p.res === "gone"){ p.done = true; if (p.res === "blocked" && geo){ const q = fxPos(p); S.rings.push({x:q.x, y:q.y, r:2, max:22, life:0.35, t:0, col:"#5fd4e8"}); } continue; }
+    }
     if (p.t >= p.dur){ p.done = true; if (!S.over) land(p); }
   }
   S.fx = S.fx.filter(p => !p.done);
@@ -1521,18 +1527,27 @@ function beamHit(p, rid){
   if (d > 0) hitRoom(them, rid, d, w);
   if (!S.over) hazardRoll(them, rid, w, d);
 }
-function land(p){
+const SHIELD_K = 0.72; // how far along its flight a shot meets the target's shield bubble
+// settle a shot at the target's shield: "miss" (dodged, flies past), "blocked" (a layer takes it), or "through"
+function screen(p){
   const {to:them, w, room:rid} = p;
   const R_ = MOD.rules;
   // dodge is rolled here, as the shot reaches their shield (FTL H1-H2): cloaking or a dead pilot now counts
-  if (Math.random()*100 < evasion(them)){ float(them, rid, "MISS", "#8394b3"); return; }
+  if (Math.random()*100 < evasion(them)){ p.dodge = true; float(them, rid, "MISS", "#8394b3"); return "miss"; }
   const sp = w.sp || 0; // shield piercing: this many layers let the shot through untouched
+  if (w.type === "ion" && them.layers > sp){ them.layers--; them.shT = 0; them.shieldHit = 1; if (them.sys.shields) them.sys.shields.ion += R_.ionDuration*(w.ion || 1); float(them, rid, "IONIZED", "#9d8cff"); AUDIO.sfx("shield"); return "blocked"; }
+  // a laser (or any non-missile) on a raised shield pops one layer and does nothing else: no hull, no fire, no breach
+  if (w.type !== "missile" && w.type !== "ion" && them.layers > sp){ them.layers--; them.shT = 0; them.shieldHit = 1; float(them, rid, "SHIELD", "#5fd4e8"); AUDIO.sfx("shield"); return "blocked"; }
+  return "through";
+}
+function land(p){
+  const {to:them, w, room:rid} = p;
+  const R_ = MOD.rules;
+  if (!p.res) p.res = screen(p); // a shot that skipped the shield check (very short flight) settles now
+  if (p.res !== "through") return;
   if (w.type === "ion"){
-    const amt = w.ion || 1;
-    if (them.layers > sp){ them.layers--; them.shT = 0; them.shieldHit = 1; if (them.sys.shields) them.sys.shields.ion += R_.ionDuration*amt; float(them, rid, "IONIZED", "#9d8cff"); AUDIO.sfx("shield"); return; }
-    const s = them.sys[rid]; if (s) s.ion += R_.ionDuration*amt; float(them, rid, "IONIZED", "#9d8cff"); burst(them, rid, "#9d8cff", 10); return;
+    const s = them.sys[rid]; if (s) s.ion += R_.ionDuration*(w.ion || 1); float(them, rid, "IONIZED", "#9d8cff"); burst(them, rid, "#9d8cff", 10); return;
   }
-  if (w.type !== "missile" && them.layers > sp){ them.layers--; them.shT = 0; them.shieldHit = 1; float(them, rid, "SHIELD", "#5fd4e8"); AUDIO.sfx("shield"); return; }
   if (w.dmg > 0) hitRoom(them, rid, w.dmg, w);
   else { burst(them, rid, "#ffb347", 14); }
   if (!S.over){ hazardRoll(them, rid, w, w.dmg); if (w.fire >= 0.9){ for (const nb of neighbors(them, rid)) if (Math.random() < 0.3) ignite(them, nb, "fire"); } }
@@ -2113,19 +2128,21 @@ function drawHullBar(ship){
   const stat = `${ship.hull}  ⛨${ship.layers}  ◇${evasion(ship)}%${ship.fleeing ? `  FTL ${Math.round(ship.ftl*100)}%` : ""}`;
   X.font = `500 10px "IBM Plex Mono", monospace`; const statW = X.measureText(stat).width;
   X.font = `600 11px "Chakra Petch", sans-serif`;
-  const x0 = Math.max(6, bx), room_ = Math.min(Math.max(bw, W*0.62), W - 6 - x0); // a long boss name shortens; the bar never runs off screen
+  // the bar along the top stops short of VENT / FTL / RESUME (on a narrow phone it ran under them)
+  let lim = W - 6; if (by < 20 && document.body.classList.contains("land")){ const ar = $("acts") && $("acts").parentElement; if (ar && ar.offsetParent){ const q = stageRect(ar), c = stageRect(cv); if (q.width) lim = Math.min(lim, q.left - c.left - 8); } }
+  const x0 = Math.max(6, bx), room_ = Math.max(60, Math.min(Math.max(bw, W*0.62), lim - x0)); // a long boss name shortens; the bar never runs off screen
   let nm = ship.name; while (nm.length > 4 && X.measureText(nm).width > room_*0.4) nm = nm.slice(0, -1);
   if (nm !== ship.name) nm = nm.trimEnd() + "…";
   const nameW = X.measureText(nm).width + 8;
   const segs = ship.maxHull, sw = Math.max(1.2, Math.min(7, (room_ - nameW - statW - 10)/segs - 1));
   // a dark backing so the name and hull read over bright planets and suns
-  const endX = Math.min(x0 + nameW + segs*(sw+1) + 6, W - 6 - statW) + statW;
+  const endX = Math.min(x0 + nameW + segs*(sw+1) + 6, Math.max(x0 + nameW, lim - statW)) + statW;
   X.save(); X.fillStyle = "rgba(4,8,16,.72)"; X.beginPath(); X.roundRect(x0 - 5, by - 4, endX - x0 + 10, 18, 5); X.fill(); X.restore();
   X.fillStyle = ship.you ? "#5fd4e8" : "#ff6b4a";
   X.save(); X.shadowColor = "rgba(0,0,0,.9)"; X.shadowBlur = 3; X.fillText(nm, x0, by + 5); X.restore();
   for (let i = 0; i < segs; i++){ X.fillStyle = i < ship.hull ? (ship.hull/ship.maxHull > .35 ? "#7cf29a" : "#ff6b4a") : "#26324a"; X.fillRect(x0 + nameW + i*(sw+1), by, sw, 10); }
   X.fillStyle = "#8394b3"; X.font = `500 10px "IBM Plex Mono", monospace`;
-  X.fillText(stat, Math.min(x0 + nameW + segs*(sw+1) + 6, W - 6 - statW), by + 5);
+  X.fillText(stat, Math.min(x0 + nameW + segs*(sw+1) + 6, Math.max(x0 + nameW, lim - statW)), by + 5);
 }
 // 3D stage: each ship's rooms and crew are drawn onto their own canvas, which the stage lays on the deck.
 function drawDeck(ship, dt){
@@ -2333,7 +2350,7 @@ function drawFx(dt){
     g.t = (g.t || 0) + dt; g.life -= dt;
     if (g.muzzle){ const c = rcenter(g.ship, g.room); X.fillStyle = `rgba(255,240,200,${g.life*4})`; X.beginPath(); X.arc(c.x, c.y, 10*(1-g.life*3), 0, 6.283); X.fill(); continue; }
     const rr = g.r + (g.max - g.r)*Math.min(1, g.t/0.45);
-    X.strokeStyle = `rgba(255,220,170,${Math.max(0,g.life*1.6)})`; X.lineWidth = 2; X.beginPath(); X.arc(g.x, g.y, rr, 0, 6.283); X.stroke();
+    X.strokeStyle = g.col ? `rgba(95,212,232,${Math.max(0,g.life*2.2)})` : `rgba(255,220,170,${Math.max(0,g.life*1.6)})`; X.lineWidth = g.col ? 3 : 2; // cyan = a shield took the shot X.beginPath(); X.arc(g.x, g.y, rr, 0, 6.283); X.stroke();
   }
   S.rings = S.rings.filter(g => g.life > 0);
   X.textAlign = "center"; X.textBaseline = "middle";
@@ -2352,10 +2369,17 @@ function drawParticles(dt){
 }
 
 /* ---------------- the sector map ---------------- */
+// the part of the map canvas the chart may use: left of the side panel, below the threat line (canvas px).
+// Every beacon is drawn inside it, with a margin, at every screen size (Michael's iPhone, 2026-10-04).
+function mapView(){
+  const b = stageRect(cv), dm = $("deckMap"); let x1 = W;
+  if (dm && !dm.hidden){ const r = stageRect(dm); if (r.width > 0 && r.left - b.left < W) x1 = Math.max(W*0.3, r.left - b.left); }
+  return {x0: 0, y0: 0, x1, y1: H, pad: 34, top: 48};
+}
 function mapGeom(){
   if (STAGE.ok && STAGE.nodeScreen.length === R.map.nodes.length) return {px: n => STAGE.nodeScreen[n.id].x, py: n => STAGE.nodeScreen[n.id].y, colX: () => -999, three: true};
-  const m = Math.max(24, W*0.05), top = 34, bot = 26;
-  return {px: n => m + n.x*(W - 2*m), py: n => top + n.y*(H - top - bot), colX: c => m + (c/(R.map.cols-1))*(W - 2*m)};
+  const v = mapView(), m = Math.max(24, v.x1*0.05), top = 44, bot = 28, w = v.x1 - 2*m;
+  return {px: n => m + n.x*w, py: n => top + n.y*(H - top - bot), colX: c => m + (c/(R.map.cols-1))*w};
 }
 function drawMap(dt){
   const mg = mapGeom(), map = R.map, t = performance.now()/1000;
@@ -2364,7 +2388,7 @@ function drawMap(dt){
   // threat front
   if (mg.three){ X.fillStyle = "rgba(255,140,150,.9)"; X.font = `600 10px "Chakra Petch", sans-serif`; X.textBaseline = "top"; X.textAlign = "left"; X.fillText(`${(R.arc ? R.arc.threat.name : "THE THREAT").toUpperCase()} \u00B7 ${Math.max(0, R.map.nodes[R.pos].col - R.threat)} JUMPS BEHIND`, 10, 10); X.fillStyle = "rgba(131,148,179,.7)"; X.fillText("DRAG TO LOOK AROUND", 10, 24); }
   else if (R.threat >= 0 || R.threat > -1.5){
-    const colW = (W - 2*Math.max(24, W*0.05))/(map.cols-1);
+    const colW = (mapView().x1 - 2*Math.max(24, mapView().x1*0.05))/(map.cols-1);
     const fx = mg.colX(R.threat) + colW*0.5;
     if (fx > 0){
       const gr = X.createLinearGradient(0,0,fx,0); gr.addColorStop(0, "rgba(255,61,90,.26)"); gr.addColorStop(1, "rgba(255,61,90,.1)");
@@ -3119,6 +3143,33 @@ const STAGE = (() => {
     chartKey = R.id + ":" + R.sector;
   }
   function setOrbitTarget(v){ orbit.tx = v.x; orbit.ty = v.y; orbit.tz = v.z; }
+  // The whole chart fits the part of the screen left of the side panel (Michael on his iPhone, 2026-10-04: "The art
+  // is outside the screen"). mapView() (p3.js) gives that area in canvas px; the camera is centred on the chart,
+  // its distance set so every beacon fits with a margin, and a view offset moves the picture into the free area.
+  let fitKey = "", fitDist = 34; const viewOff = {x: 0, y: 0};
+  function placeCamera(dist){
+    camera.position.set(orbit.cx + Math.sin(orbit.yaw)*Math.cos(orbit.pitch)*dist, orbit.cy + Math.sin(orbit.pitch)*dist, orbit.cz + Math.cos(orbit.yaw)*Math.cos(orbit.pitch)*dist);
+    camera.lookAt(orbit.cx, orbit.cy, orbit.cz); camera.updateMatrixWorld();
+  }
+  function fitChart(){
+    const v = typeof mapView === "function" ? mapView() : {x0: 0, y0: 0, x1: w3, y1: h3};
+    const key = chartKey + "|" + w3 + "x" + h3 + "|" + [v.x0, v.y0, v.x1, v.y1].map(Math.round).join(",");
+    if (key === fitKey || !chartPos.length || w3 < 2 || h3 < 2) return; fitKey = key;
+    const m = v.pad || 28, rx0 = v.x0 + m, rx1 = v.x1 - m, ry0 = v.y0 + (v.top || m), ry1 = v.y1 - m;
+    if (rx1 - rx0 < 40 || ry1 - ry0 < 40) return;
+    const bb = new THREE.Box3().setFromPoints(chartPos), c = bb.getCenter(new THREE.Vector3());
+    orbit.tx = orbit.cx = c.x; orbit.ty = orbit.cy = c.y; orbit.tz = orbit.cz = c.z; orbit.yaw = 0.35; orbit.pitch = 0.22;
+    viewOff.x = viewOff.y = 0;
+    for (let i = 0; i < 8; i++){
+      camera.setViewOffset(w3, h3, viewOff.x, viewOff.y, w3, h3); placeCamera(orbit.dist);
+      let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
+      for (const p of chartPos){ const q = project(p); x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); y0 = Math.min(y0, q.y); y1 = Math.max(y1, q.y); }
+      const sc = Math.max((x1 - x0)/(rx1 - rx0), (y1 - y0)/(ry1 - ry0), 1e-3);
+      viewOff.x += (x0 + x1)/2 - (rx0 + rx1)/2; viewOff.y += (y0 + y1)/2 - (ry0 + ry1)/2;
+      orbit.dist *= sc;
+    }
+    camera.setViewOffset(w3, h3, viewOff.x, viewOff.y, w3, h3); fitDist = orbit.dist;
+  }
 
   /* beacons: every beacon has its own sun and planet */
   const PLANET_KINDS = [
@@ -3255,8 +3306,8 @@ const STAGE = (() => {
     inCine(){ return !!(S && S.mode === "fight" && cineOn()); },
     flash(px, py, color, power){ const l = lights[lightIdx++ % lights.length]; const w = toPlaneWorld(px, py, 3); l.position.copy(w); l.color.set(color || 0xffb36b); l.intensity = power || 3; l.userData.decay = 6; },
     drag(dx, dy){ orbit.yaw -= dx*0.006; orbit.pitch = clamp(orbit.pitch + dy*0.004, -0.9, 0.9); orbit.auto = false; },
-    zoom(f){ orbit.dist = clamp(orbit.dist*f, 18, 60); },
-    focus(id){ if (chartPos[id]) setOrbitTarget(chartPos[id].clone().multiplyScalar(0.25)); },
+    zoom(f){ orbit.dist = clamp(orbit.dist*f, fitDist*0.55, fitDist*1.25); },
+    focus(id){}, // the chart stays fitted to the free area (it used to pan toward the beacon and push others off screen)
     nodeScreen: [],
     render(){
       const t = (performance.now() - t0)/1000; clock = t;
@@ -3266,13 +3317,13 @@ const STAGE = (() => {
       fight.visible = !!inFight;
       chart.visible = !!inMap;
       if (inMap){
-        if (chartKey !== R.id + ":" + R.sector) { buildChart(); setOrbitTarget(chartPos[R.pos].clone().multiplyScalar(0.25)); orbit.cx = orbit.tx; orbit.cy = orbit.ty; orbit.cz = orbit.tz; }
+        if (chartKey !== R.id + ":" + R.sector) { buildChart(); fitKey = ""; }
+        fitChart(); if (!camera.view || !camera.view.enabled) camera.setViewOffset(w3, h3, viewOff.x, viewOff.y, w3, h3);
         if (orbit.auto) orbit.yaw += 0.0006*Math.sin(t*0.1) + 0.0003;
         const e = 1 - Math.pow(0.02, 1/60); orbit.cx += (orbit.tx - orbit.cx)*e; orbit.cy += (orbit.ty - orbit.cy)*e; orbit.cz += (orbit.tz - orbit.cz)*e;
         if ((h3 > w3*1.05) !== vert) chartKey = "";
         const warp = S.warp || 0, dist = orbit.dist*(1 - warp*0.35);
-        camera.position.set(orbit.cx + Math.sin(orbit.yaw)*Math.cos(orbit.pitch)*dist, orbit.cy + Math.sin(orbit.pitch)*dist, orbit.cz + Math.cos(orbit.yaw)*Math.cos(orbit.pitch)*dist);
-        camera.lookAt(orbit.cx, orbit.cy, orbit.cz);
+        placeCamera(dist);
         const cols = R.map.cols, fx = ((R.threat + 0.5)/(cols - 1) - 0.5)*34;
         const kind = R.arc && R.arc.pursuer ? R.arc.pursuer.kind : "fleet";
         frontMat.uniforms.kind.value = ({fleet:0, nova:1, void:2, swarm:3})[kind] ?? 0;
@@ -3284,6 +3335,7 @@ const STAGE = (() => {
         nodeSprites.forEach((s, i) => { const n = R.map.nodes[i]; const pulse = n.id === R.sel ? 1.25 + 0.1*Math.sin(t*5) : 1; const over = n.col <= R.threat; s.material.opacity = n.visited && n.id !== R.pos ? 0.45 : 1; s.material.color.set(over ? 0xff4a5a : (STARCOL[Math.floor(rng32(n.seed ^ 77)()*STARCOL.length)])); s.scale.setScalar((2.2 + (n.id === R.pos ? 1 : 0))*pulse); });
         planet.visible = false; sunSprite.visible = sunHalo.visible = false;
       } else {
+        if (camera.view && camera.view.enabled) camera.clearViewOffset();
         const sway = inFight ? 0 : 1;
         camera.position.set(Math.sin(t*0.05)*1.2*sway, Math.cos(t*0.04)*0.8*sway, D);
         camera.lookAt(0, 0, 0);
