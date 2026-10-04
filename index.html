@@ -1397,6 +1397,14 @@ function update(dt){
   }
   if (!S.saidLow && S.you.hull > 0 && S.you.hull <= S.you.maxHull*0.3){ S.saidLow = true; barkAny("lowhull"); }
   if (S.you.sys.shields && S.you.layers === 0 && maxLayers(S.you) === 0 && S.t - S.saidShields > 25){ S.saidShields = S.t; barkAny("shieldsdown", c => c.on === "you"); }
+  // air running out where your crew stand: say so, and why, before anyone chokes (blind QA 2026-10-04: a whole crew
+  // suffocated on a ship with half its hull and nothing said why)
+  if (S.you.o2 && S.t - (S.saidAir || -99) > 20){
+    const low = S.you.crew.filter(c => c.hp > 0 && c.on === "you" && !SP(c).nobreath && (S.you.o2[c.room] ?? 100) < 35);
+    if (low.length){ S.saidAir = S.t; const ox = S.you.sys.oxygen, vented = Object.values(S.you.vent || {}).some(Boolean);
+      const why = vented ? "Close the vents (VENT)" : !ox ? "Get them to rooms with air" : eff(S.you, "oxygen") <= 0 ? (ox.dmg > 0 ? "OXYGEN is broken: send someone to repair it" : "Power OXYGEN on the left") : "Patch the breaches and keep OXYGEN powered";
+      setHint(`Air is running out where ${low.map(c => c.name).join(", ")} ${low.length > 1 ? "are" : "is"}. ${why}, or they will suffocate.`);
+      float(S.you, low[0].room, "LOW AIR", "#ff9bb0"); AUDIO.sfx("click"); } }
   clampPower(S.you); restorePower(S.you); clampPower(S.foe); autoPowerEnemy(S.foe);
   AUDIO.frame(S); // fire and breach loops, the low-hull alarm, the drive-ready chime, shields back up
   if (!S.over){
@@ -2701,7 +2709,7 @@ function frame(now){
     const fightNow = S && S.mode === "fight";
     if (STAGE.ok){ STAGE.resize(W, H); const ts = fightNow ? STAGE.tilt() : 1; if (Math.abs(ts - TS) > 1e-4){ TS = ts; layout(); } }
     const cineNow = STAGE.ok && fightNow && STAGE.inCine();
-    if (fightNow && !S.paused && !S.over && !cineNow) update(dt);
+    if (fightNow && !S.paused && !S.over && !cineNow) for (let k = DIAG.ff ? 8 : 1; k > 0 && !S.over; k--) update(dt);   // #debug fast-forward runs the fight 8x
     X.setTransform(DPR,0,0,DPR,0,0); X.clearRect(0,0,W,H);
     if (!STAGE.ok) drawNebula();
     const warp = S && S.warp > 0 ? S.warp : 0;
@@ -2876,10 +2884,13 @@ function buildDeck(){
 // the old fixed edge ran the vent hint under BOARD)
 function fitHint(){ const h = $("hint"), ar = document.querySelector(".actRow"); if (!h || !ar) return;
   if (!document.body.classList.contains("land") || !S || S.mode !== "fight" || !ar.offsetWidth){ if (h.style.right) h.style.right = ""; return; }
-  const box = stageRect(h.offsetParent || cv), a = stageRect(ar), r = Math.round(Math.max(8, box.left + box.width - a.left + 8)) + "px"; if (h.style.right !== r) h.style.right = r; }
+  // the hint ends left of the action buttons and, when there is one, left of the small ship's window and its name bar
+  // (a long briefing ran under the enemy's name, blind QA 2026-10-04)
+  const box = stageRect(h.offsetParent || cv), a = stageRect(ar), cvb = stageRect(cv), edge = Math.min(a.left, S.inset ? cvb.left + S.inset.x*cvb.width/W : Infinity),
+    r = Math.round(Math.max(8, box.left + box.width - edge + 8)) + "px"; if (h.style.right !== r) h.style.right = r; }
 function tickDeck(){
   if (!S || S.mode !== "fight") return;
-  { const ar = document.querySelector(".actRow"), k = (ar ? ar.offsetWidth : 0) + "," + W; if (k !== fitHint.k){ fitHint.k = k; fitHint(); } }
+  { const ar = document.querySelector(".actRow"), k = (ar ? ar.offsetWidth : 0) + "," + W + "," + (S.inset ? Math.round(S.inset.x) : ""); if (k !== fitHint.k){ fitHint.k = k; fitHint(); } }
   const you = S.you;
   you.weapons.forEach((w,i) => {
     const el = $("w"+i); if (!el) return;
@@ -2995,7 +3006,7 @@ function actJump(){ if (!S || S.over || S.you.ftl < 1) return;
 function showOffer(f, t){
   const el = $("offer"); if (!el) return;
   const what = [`${t.scrap} scrap`].concat(t.fuel ? [`${t.fuel} fuel`] : []).concat(t.missiles ? [`${t.missiles} missile${t.missiles > 1 ? "s" : ""}`] : []).join(", ");
-  $("offerText").textContent = `The ${f.name} signals surrender. They offer ${what} if you let them go. Fight on and you may take the wreck, or lose it if they run.`;
+  $("offerText").textContent = `The ${f.name} signals surrender. They offer ${what} if you let them go. ${f.flees ? "Fight on and they run: kill them before their drive spools (about 20 seconds) to take the wreck, or they get away with everything." : "Fight on and you can still take the wreck."}`;
   el.hidden = false; S.wasPausedOffer = S.paused; S.paused = true; tickDeck();
 }
 function closeOffer(){ const el = $("offer"); if (el) el.hidden = true; }
@@ -3701,8 +3712,56 @@ const RACE_ROW = {human: 0, tinker: 0, myrm: 1, basalt: 1, lumen: 2}, FRAME_COL 
 // drawn by the older atlas below. Frames: idle, walk1-4 (facing right; mirrored for left), walkd1-4 (toward the camera),
 // walku1-4 (away from it), op1-2 (op1s: a skin's side-view op1 where its op1 is a painted figure from another angle),
 // sit, link, fight + fight2 (a blow and its follow-through, alternating), hurt, down, repair + repair2 (kneeling at a panel).
-const CREW2 = {im: null, idx: null};
-(() => { const im = new Image(); im.onload = () => { fetch("art/crew_v2.json").then(r => r.ok ? r.json() : null).then(j => { if (!j || !j.skins) return; CREW2.im = im; CREW2.idx = j; SPRITES.clear(); PORTRAITS.clear(); if (S && S.mode === "fight") buildDeck(); }).catch(() => {}); }; im.src = "art/crew_v2.png"; })();
+// q: atlas pixels per crew_v2.json pixel. An iPad or a desktop draws the ship from the full-size painting
+// (hull_kestrel_hd.png), so it loads the crew at twice the pixels too (idx.hd, cut by tools/cut_crew.py): the crew then
+// have the painting's own pixel density instead of being blown up from the small cells (soft sprites on a sharp painting).
+const CREW2 = {im: null, idx: null, q: 1};
+(() => { const im = new Image(); im.onload = () => { fetch("art/crew_v2.json").then(r => r.ok ? r.json() : null).then(j => { if (!j || !j.skins) return; CREW2.im = im; CREW2.idx = j; CREW2.q = 1; SPRITES.clear(); PORTRAITS.clear(); if (S && S.mode === "fight") buildDeck();
+  if (j.hd && typeof UIK !== "undefined" && UIK > 1){ const hd = new Image(); hd.onload = () => { if (!hd.naturalWidth) return; CREW2.im = hd; CREW2.q = hd.naturalWidth/im.naturalWidth; SPRITES.clear(); }; hd.src = "art/" + j.hd; } }).catch(() => {}); }; im.src = "art/crew_v2.png"; })();
+// Grading (Michael, 2026-10-04: "the characters don't look fully a part of the scene"): the sheet frames were drawn in
+// their own Gemini chats, brighter, more contrasty and (the captain) more saturated than the same character as painted
+// in art-approved/01. Measured on the cut frames, figure pixels only (outline excluded), painted pose vs the sheet's:
+//   engineer  lightness .297 vs .32-.35, spread .111 vs .13-.14           -> exposure .93, contrast .85
+//   captain   lightness .318 vs .33-.37, spread .130 vs .155-.17, sat .34 vs .46-.50 -> .92, .82, .82
+//   Tesh      lightness .552 vs .50-.52, sat .22 vs .10-.12, painted greener -> exposure .97, colour as cut:
+//   her painted green and lightness are the shield room's cyan light on her (the game adds that itself); graded greener,
+//   blind QA saw her "a brighter mint green than the pale room" in the oxygen room
+// (part of the painted figures' cast is the room's light, which the game now adds on its own: crewLit below).
+// The painted poses are the painting's own pixels: never graded.
+const CREW_GRADE = {engineer: {exp: 0.93, con: 0.85, sat: 1, tint: [1, 1, 1]}, captain: {exp: 0.92, con: 0.82, sat: 0.82, tint: [1, 1, 1]},
+  tesh: {exp: 0.97, con: 1, sat: 1, tint: [1, 1, 1]}};
+// Edge softness (blind QA 2, 2026-10-04: on an iPad "the sprite stays sharp where the room is soft"). The approved painting
+// is soft-edged, and the game draws it softer still on a big screen (resampled into the deck texture, then by the stage).
+// Measured as fine-detail energy (|L - blur .7| / |L - blur 2.5|), figure against the room round it: the painting's own
+// crew read 1.08-1.11x their room (Tesh 1.25x); the sheet frames on a phone 0.96-1.11x (right); on an iPad 1.23-1.24x
+// (too crisp). So sheet frames from the 2x atlas get a gaussian of CREW_SOFT.hd atlas px (tools/qa/crew-blend.mjs re-measures).
+// 0.9 brought the iPad to 1.10-1.13x, but blind QA 3 still picked every iPad sprite as sharper than its room, so 1.3:
+// the phone's own figures (0.95-1.12x, judged painted) are the bar.
+const CREW_SOFT = {hd: 1.3, sd: 0}, CREW_RIM = 0;
+function crewSoften(cv, sig){
+  const w = cv.width, h = cv.height, x = cv.getContext("2d"), d = x.getImageData(0, 0, w, h), a = d.data, r = Math.ceil(sig*2.5), K = [];
+  let ks = 0; for (let i = -r; i <= r; i++){ const v = Math.exp(-i*i/(2*sig*sig)); K.push(v); ks += v; } for (let i = 0; i < K.length; i++) K[i] /= ks;
+  const f = new Float32Array(w*h*4), t = new Float32Array(w*h*4);
+  for (let p = 0; p < w*h; p++){ const al = a[p*4+3]/255; f[p*4] = a[p*4]*al; f[p*4+1] = a[p*4+1]*al; f[p*4+2] = a[p*4+2]*al; f[p*4+3] = a[p*4+3]; } // premultiplied
+  for (let y = 0; y < h; y++) for (let xx = 0; xx < w; xx++){ const o = (y*w + xx)*4; let c0 = 0, c1 = 0, c2 = 0, c3 = 0;
+    for (let i = -r; i <= r; i++){ const sx = Math.min(w - 1, Math.max(0, xx + i)), q = (y*w + sx)*4, k = K[i + r]; c0 += f[q]*k; c1 += f[q+1]*k; c2 += f[q+2]*k; c3 += f[q+3]*k; }
+    t[o] = c0; t[o+1] = c1; t[o+2] = c2; t[o+3] = c3; }
+  for (let y = 0; y < h; y++) for (let xx = 0; xx < w; xx++){ const o = (y*w + xx)*4; let c0 = 0, c1 = 0, c2 = 0, c3 = 0;
+    for (let i = -r; i <= r; i++){ const sy = Math.min(h - 1, Math.max(0, y + i)), q = (sy*w + xx)*4, k = K[i + r]; c0 += t[q]*k; c1 += t[q+1]*k; c2 += t[q+2]*k; c3 += t[q+3]*k; }
+    const al = c3/255; a[o] = al > 0 ? c0/al : 0; a[o+1] = al > 0 ? c1/al : 0; a[o+2] = al > 0 ? c2/al : 0; a[o+3] = c3; }
+  x.putImageData(d, 0, 0);
+}
+function crewGrade(cv, g){
+  const x = cv.getContext("2d"), d = x.getImageData(0, 0, cv.width, cv.height), a = d.data; let n = 0, sum = 0;
+  for (let i = 0; i < a.length; i += 4) if (a[i+3] > 200){ const L = (a[i]*0.299 + a[i+1]*0.587 + a[i+2]*0.114)/255; if (L >= 0.16){ sum += L; n++; } }
+  const mid = n ? sum/n : 0.35;
+  for (let i = 0; i < a.length; i += 4){ if (!a[i+3]) continue; let r = a[i]/255, gg = a[i+1]/255, b = a[i+2]/255; const L = r*0.299 + gg*0.587 + b*0.114;
+    if (L < 0.16){ const k = g.exp; a[i] = r*k*255; a[i+1] = gg*k*255; a[i+2] = b*k*255; continue; } // the outline keeps its weight
+    const L2 = (mid + (L - mid)*g.con)*g.exp, s = L > 1e-3 ? L2/L : 1; r *= s; gg *= s; b *= s; // exposure and contrast on lightness, hue kept
+    const m = r*0.299 + gg*0.587 + b*0.114; r = m + (r - m)*g.sat; gg = m + (gg - m)*g.sat; b = m + (b - m)*g.sat;
+    a[i] = Math.min(255, r*g.tint[0]*255); a[i+1] = Math.min(255, gg*g.tint[1]*255); a[i+2] = Math.min(255, b*g.tint[2]*255); }
+  x.putImageData(d, 0, 0);
+}
 const CREW2_FALLBACK = {walk1: ["walk1", "walk3"], walk2: ["walk2", "walk3", "walk1"], walk3: ["walk3", "walk1"], walk4: ["walk4", "walk2", "walk1"], fight: ["fight", "op1"], fight2: ["fight2", "fight", "op1"], work: ["repair", "op1"], repair2: ["repair2", "repair", "op1"], op1: ["op1"], op2: ["op2", "op1"], op1s: ["op1s", "op2", "op1"],
   walkd1: ["walkd1", "walk1"], walkd2: ["walkd2", "walk2", "walk1"], walkd3: ["walkd3", "walk3", "walk1"], walkd4: ["walkd4", "walk4", "walk1"],
   walku1: ["walku1", "walk1"], walku2: ["walku2", "walk2", "walk1"], walku3: ["walku3", "walk3", "walk1"], walku4: ["walku4", "walk4", "walk1"], sit: ["sit", "op1"], link: ["link", "op1"], down: ["down"], hurt: ["hurt"]};
@@ -3718,7 +3777,10 @@ function crewPaintedHere(c, frame, ship){ if (!crewPainted(c, frame)) return fal
 function crewSprite(c, frame){
   const f2 = crewFrame2(c, frame);
   if (f2){ const key = `v2|${f2[0]}|${f2[1]}`; if (SPRITES.has(key)) return SPRITES.get(key);
-    const r = f2[2], cv = document.createElement("canvas"); cv.width = cv.height = r[2]; cv.square = true; cv.getContext("2d").drawImage(CREW2.im, r[0], r[1], r[2], r[3], 0, 0, r[2], r[3]);
+    const q = CREW2.q || 1, r = f2[2].map(v => Math.round(v*q)), cv = document.createElement("canvas"); cv.width = cv.height = r[2]; cv.square = true; cv.getContext("2d").drawImage(CREW2.im, r[0], r[1], r[2], r[3], 0, 0, r[2], r[3]);
+    const painted = (CREW2.idx.skins[f2[0]].painted || []).includes(f2[1]), g = CREW_GRADE[f2[0]];
+    if (g && !painted) try { crewGrade(cv, g); } catch {} // (a canvas that can't be read stays as cut)
+    const soft = !painted && (q > 1 ? CREW_SOFT.hd : CREW_SOFT.sd); if (soft > 0) try { crewSoften(cv, soft); } catch {}
     SPRITES.set(key, cv); return cv; }
   if (CREW_ATLAS.complete && CREW_ATLAS.naturalWidth){
     const key = `atlas|${c.species}|${frame}`; if (SPRITES.has(key)) return SPRITES.get(key);
@@ -4160,12 +4222,85 @@ function whiteOf(spr){ let w = WHITE_SPR.get(spr); if (w) return w;
   g.drawImage(spr, 0, 0); g.globalCompositeOperation = "source-in"; g.fillStyle = "#fff"; g.fillRect(0, 0, w.width, w.height); WHITE_SPR.set(spr, w); return w; }
 const CREW_SHADOW = (() => { const c = document.createElement("canvas"); c.width = 48; c.height = 24; const g = c.getContext("2d"), r = g.createRadialGradient(24, 12, 1, 24, 12, 24);
   r.addColorStop(0, "rgba(0,0,0,.6)"); r.addColorStop(1, "rgba(0,0,0,0)"); g.setTransform(1, 0, 0, 0.5, 0, 0); g.fillStyle = r; g.fillRect(0, 0, 48, 48); return c; })();
+// ---- the crew in the painting (Michael, 2026-10-04: "The characters don't look fully a part of the scene", "It looks odd
+// and not pro"). The painting's crew share its light, its pixels and its floor; these give the game's crew the same.
+function blobFall(u){ return u >= 1 ? 0 : u < 0.4 ? 1 - u/0.4*0.5 : 0.5*(1 - (u - 0.4)/0.6); } // kitBlob's radial stops: 1, .5 at 0.4, 0 at the edge
+// the light at a point of a kit ship (its painting's px), as kitLightMap paints it on the floor there: the room's ambient
+// (dim when unpowered, red on alert), its ceiling lamp, its machine's light in the system's colour, fire. 0..1 per channel.
+function kitLightAt(ship, sh, id, hx, hy, t){
+  const b = sh.bbs[id]; if (!b) return null;
+  hx = clamp(hx, b[0], b[0] + b[2]); hy = clamp(hy, b[1], b[1] + b[3]); // (lights are clipped to the room: a head over the wall is lit as the room is)
+  const s = ship.sys[id], kt = sh.kit[id], hz = ship.hz && ship.hz[id], pa = sh.kd && sh.kd.painted, alert = kitAlert(ship), red = 0.5 + 0.5*Math.sin(t*6.3);
+  const pw = s && s.level ? (ship.you ? eff(ship, id) : cap(ship, id)) : 1, cons = id === "pilot" || id === "doors" || id === "sensors";
+  const off = s && s.level && (cons ? s.dmg >= s.level : pw <= 0);
+  const L = alert ? [(pa ? 170 : 120) + 40*red, (pa ? 80 : 44) - 10*red, (pa ? 86 : 50) - 10*red] : off ? (pa ? [96, 99, 112] : [34, 37, 48]) : (pa ? [206, 206, 210] : [58, 63, 80]);
+  const add = (rgb, a) => { for (let i = 0; i < 3; i++) L[i] += rgb[i]*a; };
+  const lr = Math.max(b[2], b[3])*0.7; add([112, 106, 96], (s && s.level && pw <= 0 && !cons ? 0.25 : 0.5)*blobFall(Math.hypot(hx - b[0] - b[2]/2, hy - b[1] - b[3]/2)/lr));
+  const lp = (ship._lp || {})[id] || 0, m = kt && kt.mach;
+  if (s && m && lp > 0.01) add(SYS_RGB[id] || [200, 200, 200], clamp(lp*1.15, 0, 1)*blobFall(Math.hypot(hx - m[0] - m[2]/2, hy - m[1] - m[3]/2)/(sh.cell*1.7)));
+  if (hz && hz.fire > 0) add([255, 130, 40], clamp((0.7 + 0.2*Math.sin(t*13 + b[0]))*(0.5 + hz.fire/200), 0, 1)*blobFall(Math.hypot(hx - b[0] - b[2]/2, hy - b[1] - b[3]*0.6)/(sh.cell*1.3)));
+  return L.map(v => clamp(v, 0, 255)/255);
+}
+// a crew member's light: the room's light at their left and right side (chest high) and the edge light they catch
+function crewLight(ship, sh, ca, c, sx, feet, Z, t, rim){
+  if (KIT_LIT.tier < 0) return null; // the bare painting (side-by-side checks)
+  const id = typeof crewRoomNow === "function" ? crewRoomNow(ship, c) : c.room, hx = (sx - ca.x)/ca.s, hy = (feet - Z*0.33 - ca.y)/ca.s, d = Z*0.2/ca.s;
+  if (KIT_LIT.tier === 0){ const s = ship.sys[id], off = s && s.level && (ship.you ? eff(ship, id) : cap(ship, id)) <= 0 && id !== "pilot"; return off ? {l: [0.6, 0.6, 0.62], r: [0.6, 0.6, 0.62]} : null; }
+  const l = kitLightAt(ship, sh, id, hx - d, hy, t), r = kitLightAt(ship, sh, id, hx + d, hy, t); if (!l || !r) return null;
+  const out = {l, r, rim: null}; if (!rim) return out;
+  // the edge light: the room's machine light when it is near and on (cyan by the shields, orange by the engines), else the lamp
+  const kt = sh.kit[id], m = kt && kt.mach, lp = (ship._lp || {})[id] || 0;
+  const mf = m && lp > 0.05 ? clamp(lp, 0, 1)*blobFall(Math.hypot(hx - m[0] - m[2]/2, hy - m[1] - m[3]/2)/(sh.cell*1.9)) : 0;
+  out.rim = mf > 0.08 ? {rgb: SYS_RGB[id] || [220, 220, 220], a: 0.1 + 0.3*mf} : {rgb: [255, 236, 205], a: 0.12*Math.max(l[0], r[0])};
+  return out;
+}
+// the figure's lit edge (one art pixel inside its outline, on the side the light comes from: top left on screen, so top
+// right in a sprite drawn mirrored), white; tinted per light colour and cached
+const RIM = new WeakMap();
+function crewRimMask(spr, left){
+  let e = RIM.get(spr); if (!e) RIM.set(spr, e = {tint: new Map()});
+  const k = left ? "l" : "r"; if (e[k]) return e[k];
+  const w = spr.width, h = spr.height, d = spr.getContext("2d").getImageData(0, 0, w, h).data, o = document.createElement("canvas"); o.width = w; o.height = h;
+  const ox = o.getContext("2d"), od = ox.createImageData(w, h), A = od.data, st = Math.max(2, Math.round(w/80)), dx = left ? -st : st;
+  const al = (x, y) => x < 0 || y < 0 || x >= w || y >= h ? 0 : d[(y*w + x)*4 + 3];
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++){ const i = (y*w + x)*4; if (d[i+3] < 200) continue;
+    if ((d[i]*0.299 + d[i+1]*0.587 + d[i+2]*0.114)/255 < 0.16) continue; // the outline stays dark
+    const up = al(x, y - 2*st) < 90, side = al(x + 2*dx, y) < 90, diag = al(x + 2*dx, y - 2*st) < 90;
+    const v = up && side ? 1 : diag ? 0.8 : up ? 0.6 : side ? 0.45 : 0; if (!v) continue;
+    A[i] = A[i+1] = A[i+2] = 255; A[i+3] = Math.round(255*v); }
+  ox.putImageData(od, 0, 0); return e[k] = o;
+}
+function crewRimTint(spr, left, rgb){
+  const e = RIM.get(spr) || (crewRimMask(spr, left), RIM.get(spr)), key = (left ? "l" : "r") + rgb.join(","); let c = e.tint.get(key); if (c) return c;
+  const m = crewRimMask(spr, left); c = document.createElement("canvas"); c.width = m.width; c.height = m.height; const x = c.getContext("2d");
+  x.drawImage(m, 0, 0); x.globalCompositeOperation = "source-in"; x.fillStyle = `rgb(${rgb.join(",")})`; x.fillRect(0, 0, c.width, c.height); e.tint.set(key, c); return c;
+}
+// the figure under its light: multiplied by the room's light from its left side to its right (as the floor under it is
+// by the light map), then its lit edge added. One scratch canvas, drawn from at once.
+const CREW_LIT = {c: null};
+function crewLit(spr, L, flip){
+  const c = CREW_LIT.c || (CREW_LIT.c = document.createElement("canvas"));
+  if (c.width !== spr.width || c.height !== spr.height){ c.width = spr.width; c.height = spr.height; }
+  const x = c.getContext("2d"), [a, b] = flip ? [L.r, L.l] : [L.l, L.r], css = v => `rgb(${Math.round(v[0]*255)},${Math.round(v[1]*255)},${Math.round(v[2]*255)})`;
+  x.globalAlpha = 1; x.globalCompositeOperation = "source-over"; x.clearRect(0, 0, c.width, c.height); x.drawImage(spr, 0, 0);
+  x.globalCompositeOperation = "multiply"; const g = x.createLinearGradient(c.width*0.3, 0, c.width*0.7, 0); g.addColorStop(0, css(a)); g.addColorStop(1, css(b)); x.fillStyle = g; x.fillRect(0, 0, c.width, c.height);
+  x.globalCompositeOperation = "destination-in"; x.drawImage(spr, 0, 0);
+  if (L.rim && L.rim.a > 0.02){ x.globalCompositeOperation = "lighter"; x.globalAlpha = Math.min(1, L.rim.a); x.drawImage(crewRimTint(spr, !flip, L.rim.rgb), 0, 0); }
+  x.globalCompositeOperation = "source-over"; x.globalAlpha = 1; return c;
+}
+// where a figure meets the floor: the span of its lowest rows (cell fractions)
+const FOOT = new WeakMap();
+function crewFoot(spr){ let f = FOOT.get(spr); if (f) return f;
+  const w = spr.width, h = spr.height, d = spr.getContext("2d").getImageData(0, 0, w, h).data; let bot = -1;
+  for (let y = h - 1; y >= 0 && bot < 0; y--) for (let x = 0; x < w; x++) if (d[(y*w + x)*4 + 3] > 120){ bot = y; break; }
+  let x0 = w, x1 = -1; for (let y = Math.max(0, bot - Math.round(h*0.08)); y <= bot; y++) for (let x = 0; x < w; x++) if (d[(y*w + x)*4 + 3] > 120){ if (x < x0) x0 = x; if (x > x1) x1 = x; }
+  f = x1 < 0 ? {c: 0.5, w: 0.2} : {c: (x0 + x1 + 1)/2/w, w: (x1 - x0 + 1)/w}; FOOT.set(spr, f); return f; }
 function drawCrew(ship, g){
   const t = performance.now()/1000, now = performance.now();
   const live = S && !S.paused && !S.over, sh = ship.cut && ship.cut.kit && SHAPED[ship.cut.art], ca0 = sh && cutArt(ship);
   const cs = sh && sh.kd.crew && ca0 ? sh.kd.crew*ca0.s : ship.cut ? g.cell : g.cell*0.63; // one crew tile on screen (a painted ship sets its own)
-  for (const c of allCrew()){
-    if (c.on !== ship.key || c.gx == null) continue;
+  // back to front (feet higher on the screen first), so whoever stands nearer the camera overlaps whoever is behind them
+  for (const c of allCrew().filter(c => c.on === ship.key && c.gx != null).sort((a, b) => a.gy - b.gy)){
     if (c._fight !== S){ c._fight = S; c._tpAt = S.t > 0.5 && c.hp > 0 ? now : 0; c._deadAt = c.hp > 0 ? 0 : -1e9; } // new aboard mid-fight: they beamed in
     if (c.hp <= 0 && !c._deadAt) c._deadAt = now;
     if (c.hp <= 0 && now - c._deadAt > 1600) continue;
@@ -4208,13 +4343,6 @@ function drawCrew(ship, g){
     else if (!dead && c.act === "man" && sh){ const kt = sh.kit[c.room]; if (kt && kt.gc){ const dx = (kt.gc[0] - c.gx)*(ship.you ? 1 : -1); if (Math.abs(dx) > 0.2){ ox += Math.sign(dx)*cs*0.07; flip = dx < 0; } oy += Math.sin(t*9 + c.seed)*cs*0.006; } }
     else if (!dead && c.act === "idle" && Math.sin(t*0.7 + (c.seed % 13)) > 0.93) flip = !flip; // a glance about
     const breath = !dead && (st || c.act === "idle" || c.act === "man") ? 1 + 0.012*Math.sin(t*2.3 + seed*6.3) : 1; // the operating loop: they breathe, they don't freeze
-    // soft shadow, away from the room's light on a kit ship
-    const so = sh ? kitShadow(ship, c, cs, p) : [cs*0.06, cs*0.05], lift = Math.max(0, -oy/cs);
-    if (!asPainted){ X.save(); X.globalAlpha = dead ? Math.max(0, 1 - (now - c._deadAt)/1600) : 1 - lift*4; // (a painted figure brings its own shadow)
-      X.drawImage(CREW_SHADOW, p.x + so[0] - cs*0.3, feet + so[1] - cs*0.12, cs*0.6*(1 - lift*2), cs*0.24); X.restore(); }
-    if (!mine && !dead){ X.strokeStyle = "rgba(255,90,70,.85)"; X.lineWidth = 2; X.beginPath(); X.ellipse(p.x, feet - cs*0.02, cs*0.3, cs*0.11, 0, 0, 6.283); X.stroke(); } // their crew: a red ring at the feet
-    if (SP(c).powers && !dead){ const gl = X.createRadialGradient(p.x, feet - cs*0.5, 0, p.x, feet - cs*0.5, cs*0.7); gl.addColorStop(0, "rgba(255,240,170,.4)"); gl.addColorStop(1, "rgba(255,240,170,0)"); X.fillStyle = gl; X.fillRect(p.x - cs, feet - cs*1.2, cs*2, cs*1.4); }
-    if (mine && S.selC === S.you.crew.indexOf(c)){ X.strokeStyle = "#ffc857"; X.lineWidth = 2; X.beginPath(); X.ellipse(p.x, feet - cs*0.02, cs*0.34, cs*0.12, 0, 0, 6.283); X.stroke(); }
     // walking up or down the screen: the toward-camera / away frames (with some give, so a diagonal doesn't flicker between views)
     if (c.act === "walk"){ const vy = Math.sin(c.face || 0), vx = Math.abs(Math.cos(c.face || 0)); c._vert = c._vert ? (Math.abs(vy) > vx*0.8 ? (vy > 0 ? "d" : "u") : "") : (Math.abs(vy) > vx*1.25 ? (vy > 0 ? "d" : "u") : ""); }
     const wv = v2 && c._vert && crewHas(c, "walk" + c._vert + "1") ? "walk" + c._vert : "walk";
@@ -4222,34 +4350,62 @@ function drawCrew(ship, g){
     const frame = dead ? (crewHas(c, "down") ? "down" : "idle") : hurt ? "hurt" : foe ? (strike ? ((c._blows || 0) % 2 === 0 ? "fight2" : "fight") : "idle") : opF || (c.act === "walk" ? walkF : crewFrame(c)); // a fighter strikes in the lunge, stands guard between
     const spr = crewSprite(c, frame);
     c._frame = frame; c._flip = flip; // (read by the frame-strip QA)
+    const sitting = !dead && !asPainted && opF === "sit" && crewHas(c, "sit"); // seated, seen from above and behind, facing the way the seat faces (as the painted captain sits)
+    const seatedNoFrame = !dead && !asPainted && opF === "sit" && !crewHas(c, "sit") && spr.square; // (an enemy's: sunk into the painted seat)
+    const dflip = asPainted ? false : sitting ? Math.cos(st.face*Math.PI/180) < -0.2 : flip; // how the sprite is drawn
+    // grounded (docs/LIGHTING.md 2.3): a contact shadow as wide as what stands on the floor, tight and dark at the feet, and
+    // a softer one cast down and to the right (the light is top left; away from a lit machine in its room). A painted
+    // figure at its own station brings its own shadow from the painting.
+    const so = sh ? kitShadow(ship, c, cs, p) : [cs*0.06, cs*0.05], lift = Math.max(0, -oy/cs);
+    if (!asPainted && !sitting && !seatedNoFrame && spr.square){ const fp = crewFoot(spr), fw = Math.max(Z*0.12, fp.w*Z*1.08)*(1 - lift*2), fx = p.x + ox + (fp.c - 0.5)*Z*(dflip ? -1 : 1);
+      X.save(); X.globalAlpha = (dead ? Math.max(0, 1 - (now - c._deadAt)/1600) : 1)*Math.max(0, 1 - lift*4);
+      X.globalAlpha *= 0.6; X.drawImage(CREW_SHADOW, fx + so[0]*0.6 - fw*0.62, feet + so[1]*0.6 - fw*0.2, fw*1.24, fw*0.4); // cast
+      X.globalAlpha /= 0.6; X.drawImage(CREW_SHADOW, fx - fw*0.5, feet - fw*0.13, fw, fw*0.26); X.restore(); } // contact
+    if (!mine && !dead){ X.strokeStyle = "rgba(255,90,70,.85)"; X.lineWidth = 2; X.beginPath(); X.ellipse(p.x, feet - cs*0.02, cs*0.3, cs*0.11, 0, 0, 6.283); X.stroke(); } // their crew: a red ring at the feet
+    if (SP(c).powers && !dead){ const gl = X.createRadialGradient(p.x, feet - cs*0.5, 0, p.x, feet - cs*0.5, cs*0.7); gl.addColorStop(0, "rgba(255,240,170,.4)"); gl.addColorStop(1, "rgba(255,240,170,0)"); X.fillStyle = gl; X.fillRect(p.x - cs, feet - cs*1.2, cs*2, cs*1.4); }
+    if (mine && S.selC === S.you.crew.indexOf(c)){ X.strokeStyle = "#ffc857"; X.lineWidth = 2; X.beginPath(); X.ellipse(p.x, feet - cs*0.02, cs*0.34, cs*0.12, 0, 0, 6.283); X.stroke(); }
+    // turning, changing what they do, or a console's two frames ease into each other (no hard pop); walk, fight and repair
+    // frames are cycles and stay crisp
+    const fam = frame.replace(/^walk[du]?\d$/, "walk").replace(/^op(1s|\d)$/, "op").replace(/^(fight2?|repair2?)$/, "$1").replace(/2$/, "");
+    const was = c._drawn, cyc_ = fam === "walk" || fam === "fight" || fam === "repair";
+    if (was && !dead && (was.fam !== fam || (!cyc_ && (was.spr !== spr || was.flip !== dflip)))) c._xf = {spr: was.spr, flip: was.flip, at: now};
+    c._drawn = {spr, fam, flip: dflip};
     X.save(); X.imageSmoothingEnabled = true; X.imageSmoothingQuality = "high"; // the 128 px figures are drawn smaller: smooth, not jagged
-    if (c.grief > 0) X.globalAlpha = 0.8;
+    const ga = c.grief > 0 ? 0.8 : 1;
     const tp = c._tpAt ? (now - c._tpAt)/450 : 1; // beaming in: a light column, the figure revealed top down
     if (tp < 1){ X.save(); X.globalCompositeOperation = "lighter"; const hgt = Math.sin(tp*Math.PI)*cs*1.3; X.fillStyle = `rgba(150,230,255,${0.75*Math.sin(tp*Math.PI)})`; X.fillRect(p.x - cs*0.22, feet - hgt, cs*0.44, hgt); X.restore();
       X.beginPath(); X.rect(p.x - Z, feet - Z*1.1, Z*2, Z*1.1*tp + 1); X.clip(); }
-    if (dead){ const k = Math.min(1, (now - c._deadAt)/300); X.globalAlpha = Math.max(0, 1 - Math.max(0, now - c._deadAt - 700)/900);
-      if (crewHas(c, "down")){ X.translate(p.x, feet); if (flip) X.scale(-1, 1); X.drawImage(spr, -Z/2, -Z*0.97, Z, Z); } // the sheet's own fall
-      else { X.translate(p.x, feet - cs*0.1); X.rotate((flip ? -1 : 1)*k*Math.PI/2); X.translate(0, -Z*0.45); if (flip) X.scale(-1, 1); X.drawImage(spr, -Z/2, -Z*0.52, Z, Z); } }
-    else if (asPainted){ X.translate(p.x, feet); X.scale(1, breath); X.drawImage(spr, -Z/2, -Z*0.97, Z, Z); }
-    else if (opF === "sit" && crewHas(c, "sit")){ X.translate(p.x, feet); if (Math.cos(st.face*Math.PI/180) < -0.2) X.scale(-1, 1); X.scale(1, breath); X.drawImage(spr, -Z/2, -Z*0.97, Z, Z); } // seated, seen from above and behind, facing the way the seat faces (as the painted captain sits)
-    else if (opF === "sit" && spr.square){ // seated, for a figure with no sit frame (an enemy's): down in the painted seat, the seat point at the
-      // hips, the legs out of sight below them, facing the way the seat faces (the raider's pilot, as in art-approved/08)
-      X.beginPath(); X.rect(p.x - Z, feet - Z*1.2, Z*2, Z*1.2); X.clip();
-      X.translate(p.x, feet + Z*0.38); if (flip) X.scale(-1, 1); X.scale(1, breath); X.drawImage(spr, -Z/2, -Z*0.97, Z, Z); }
-    else if (spr.square){ X.translate(p.x + ox, feet + oy); if (flip) X.scale(-1, 1); X.scale(1, breath); X.drawImage(spr, -Z/2, -Z*0.97, Z, Z);
+    // in the room's light, as the floor under them is (crewLight / crewLit): a painted figure gets the same light as the
+    // painting round it, so the two stay as painted. (The edge light, CREW_RIM, is off: the painting's crew have none, and
+    // blind QA 3 read it as a halo: "a cyan rim", "a green fringe along the hair", "light pixels round the gloves".)
+    const LT = spr.square && sh && ca0 ? crewLight(ship, sh, ca0, c, p.x + ox, feet, Z, t, !asPainted && CREW_RIM > 0) : null;
+    const put = (s0, fl, a) => { X.globalAlpha = a; X.drawImage(LT ? crewLit(s0, LT, fl) : s0, -Z/2, -Z*0.97, Z, Z); };
+    if (dead){ const k = Math.min(1, (now - c._deadAt)/300), a = ga*Math.max(0, 1 - Math.max(0, now - c._deadAt - 700)/900);
+      if (crewHas(c, "down")){ X.translate(p.x, feet); if (flip) X.scale(-1, 1); put(spr, flip, a); } // the sheet's own fall
+      else { X.translate(p.x, feet - cs*0.1); X.rotate((flip ? -1 : 1)*k*Math.PI/2); X.translate(0, -Z*0.45); if (flip) X.scale(-1, 1); X.globalAlpha = a; X.drawImage(spr, -Z/2, -Z*0.52, Z, Z); } }
+    else if (spr.square){ const still = asPainted || sitting || seatedNoFrame;
+      // seated, for a figure with no sit frame (an enemy's): down in the painted seat, the seat point at the hips, the legs
+      // out of sight below them, facing the way the seat faces (the raider's pilot, as in art-approved/08)
+      if (seatedNoFrame){ X.beginPath(); X.rect(p.x - Z, feet - Z*1.2, Z*2, Z*1.2); X.clip(); X.translate(0, Z*0.38); }
+      X.translate(p.x + (still ? 0 : ox), feet + (still ? 0 : oy)); if (dflip) X.scale(-1, 1); X.scale(1, breath);
+      put(spr, dflip, ga);
+      const xf = c._xf, xk = xf ? (now - xf.at)/160 : 1;
+      if (xf && xk < 1){ X.save(); if (xf.flip !== dflip) X.scale(-1, 1); put(xf.spr, xf.flip, ga*(1 - xk)); X.restore(); } else c._xf = null;
       if (c._flashAt && now - c._flashAt < 90){ X.globalAlpha = 0.35; X.drawImage(whiteOf(spr), -Z/2, -Z*0.97, Z, Z); } }
-    else { const w = cs*0.7, hh = cs*0.92; X.translate(p.x + ox, feet + oy); if (flip) X.scale(-1, 1); X.drawImage(spr, -w/2, -hh, w, hh);
+    else { const w = cs*0.7, hh = cs*0.92; X.globalAlpha = ga; X.translate(p.x + ox, feet + oy); if (flip) X.scale(-1, 1); X.drawImage(spr, -w/2, -hh, w, hh);
       if (c._flashAt && now - c._flashAt < 90){ X.globalAlpha = 0.35; X.drawImage(whiteOf(spr), -w/2, -hh, w, hh); } }
     X.restore();
     if (dead) continue;
     if (c.mindLink && c.act === "man" && sh && (opF === "link" || (opF && opF.startsWith("op")))){ const kt = sh.kit[c.room], ca = cutArt(ship); // the queen works the console by mind: antennae aglow, a violet thread to it
       const tip = spriteTips(spr), pulse = 0.6 + 0.3*Math.sin(t*4 + c.seed), hx = p.x + (tip.x - 0.5)*Z, hy = feet - (0.97 - tip.y)*Z;
       X.save(); X.globalCompositeOperation = "lighter";
-      for (const ax of [tip.x0, tip.x1]){ const gx = p.x + (ax - 0.5)*Z, r = cs*0.16*(0.8 + 0.3*pulse), gl = X.createRadialGradient(gx, hy, 0, gx, hy, r);
-        gl.addColorStop(0, `rgba(225,190,255,${0.8*pulse})`); gl.addColorStop(1, "rgba(200,150,255,0)"); X.fillStyle = gl; X.fillRect(gx - r, hy - r, r*2, r*2); }
+      for (const ax of [tip.x0, tip.x1]){ const gx = p.x + (ax - 0.5)*Z, r = cs*0.11*(0.8 + 0.3*pulse), gl = X.createRadialGradient(gx, hy, 0, gx, hy, r);
+        gl.addColorStop(0, `rgba(225,190,255,${0.3*pulse})`); gl.addColorStop(1, "rgba(200,150,255,0)"); X.fillStyle = gl; X.fillRect(gx - r, hy - r, r*2, r*2); }
       if (kt && kt.mach && ca){ const mx = ca.x + (kt.mach[0] + kt.mach[2]/2)*ca.s, my = ca.y + (kt.mach[1] + kt.mach[3]/2)*ca.s;
-        X.strokeStyle = `rgba(200,150,255,${pulse})`; X.lineWidth = Math.max(1.5, cs*0.05); X.setLineDash([cs*0.06, cs*0.05]); X.lineDashOffset = -t*cs*0.3;
-        X.beginPath(); X.moveTo(hx, hy); X.quadraticCurveTo((hx + mx)/2, Math.min(hy, my) - cs*0.35, mx, my); X.stroke(); }
+        // a faint thread with soft beads running along it (blind QA, 2026-10-04: square dashes read as pasted-on squares)
+        const arc = () => { X.beginPath(); X.moveTo(hx, hy); X.quadraticCurveTo((hx + mx)/2, Math.min(hy, my) - cs*0.35, mx, my); };
+        X.lineCap = "round"; X.strokeStyle = `rgba(200,150,255,${0.12*pulse})`; X.lineWidth = Math.max(1, cs*0.02); arc(); X.stroke();
+        X.strokeStyle = `rgba(215,175,255,${0.4*pulse})`; X.lineWidth = Math.max(1, cs*0.026); X.setLineDash([0.01, cs*0.09]); X.lineDashOffset = -t*cs*0.3; arc(); X.stroke(); }
       X.restore(); }
     const bw = cs*0.5, by = feet + 2; // health shows on the hurt and the fighting
     if (c.hp < c.maxHp || c.act === "fight"){ X.fillStyle = "#26324a"; X.fillRect(p.x - bw/2, by, bw, 2.5);
@@ -4402,7 +4558,8 @@ function buildKitPainted(ship, kd, hs, R){
   const cw = c.width, al = x.getImageData(0, 0, cw, c.height).data, rowR = new Float32Array(h);
   for (let yy = 0; yy < h; yy++){ const row = Math.min(c.height - 1, Math.floor(yy*q)); let r = -1; for (let xx = cw - 1; xx >= 0; xx--) if (al[(row*cw + xx)*4 + 3] > 60){ r = xx/q; break; } rowR[yy] = r; }
   const hatches = (R.hatches || []).filter(t => polys[lid[t.a]] && polys[lid[t.b]]).map(t => ({a: lid[t.a], b: lid[t.b], x: fx(t.x)}));
-  return {c, w, h, q, ready: true, rooms, paths, bbs, kit, cell, hb, doors, rowR, polys, hatches, kd: {painted: true, crew: kd.crew, tile, flip, w, cell}, nest: R.nest};
+  const blocks = (R.blocks || []).map(([bx, by, bw, bh]) => [flip ? w - bx - bw : bx, by, bw, bh]); // painted furniture crew never stand in
+  return {c, w, h, q, ready: true, rooms, paths, bbs, kit, cell, hb, doors, rowR, polys, hatches, blocks, kd: {painted: true, crew: kd.crew, tile, flip, w, cell}, nest: R.nest};
 }
 // the station a crew member is working at: whoever holds it (src/crewnav.js navHolder, the first crew member headed
 // there who can work it), once they have walked onto its spot and stopped (idle at their post when a fight opens paused)
@@ -4502,8 +4659,8 @@ function buildKit(ship, kd, hs, dm){
    over the deck: each room has a dark ambient, a ceiling lamp, its machine's light in the system's colour
    (pulsing with the machine, scaled by power, dropping out when damaged) and fire light, all clipped to the
    room so no light leaks through walls. A red-alert ambient pulses when the hull is low or a system is
-   broken. Then a faint additive bloom over lit machines. Crew are drawn after, unlit, so they stay readable;
-   their shadows fall away from their room's light. Quality drops a tier on its own if frames run slow. ---- */
+   broken. Then a faint additive bloom over lit machines. Crew are drawn after, under the same light (crewart.js
+   kitLightAt / crewLit: the light map's value where they stand), with their shadows falling away from their room's light. Quality drops a tier on its own if frames run slow. ---- */
 const KIT_LIT = {tier: 2, ema: 0, slowT: 0};
 const SYS_RGB = {shields:[56,189,248], engines:[251,146,60], weapons:[255,176,80], oxygen:[70,220,200], medbay:[90,235,140], pilot:[120,190,255], sensors:[110,215,255], doors:[255,200,90], tele:[190,140,255], cloak:[160,140,255], drones:[255,200,90], lock:[255,80,100]};
 const KIT_BLOBS = {};
@@ -4687,7 +4844,8 @@ function navFromPainted(ship, sh, key){
       station: st ? {x: st.x*k, y: st.y*k, face: st.face, pose: st.pose} : null}; }
   const doors = (sh.doors || []).map((d, i) => ({a: d.a, b: d.b, vert: d.vert, rect: d.rect.map(v => v*k), src: i}));
   const hatches = (sh.hatches || []).map(h => ({a: h.a, b: h.b, x: h.x*k}));
-  return navBuild({key, painted: true, rooms, doors, hatches, margin: 0.12, step: 0.5, spot: 1.0, fight: 0.55});
+  const blocks = (sh.blocks || []).map(([bx, by, bw, bh]) => [bx*k, by*k, (bx + bw)*k, (by + bh)*k]); // furniture: nobody stands on a console
+  return navBuild({key, painted: true, rooms, doors, hatches, blocks, margin: 0.12, step: 0.5, spot: 1.0, fight: 0.55});
 }
 // a grid ship: its rooms are the grid rects, its doors the middle of every shared wall (crewGraph's rule)
 function navFromGrid(ship, key){
@@ -4721,7 +4879,7 @@ function navSees(nav, R, a, b){
 // ---- the graph
 function navBuild(spec){
   const nav = {key: spec.key, painted: spec.painted, m: spec.margin, fight: spec.fight, rooms: {}, nodes: [], adj: [], doors: [], hatches: [], warn: [],
-    block: spec.doors.map(d => [d.rect[0] - 0.05, d.rect[1] - 0.05, d.rect[0] + d.rect[2] + 0.05, d.rect[1] + d.rect[3] + 0.05])};
+    block: spec.doors.map(d => [d.rect[0] - 0.05, d.rect[1] - 0.05, d.rect[0] + d.rect[2] + 0.05, d.rect[1] + d.rect[3] + 0.05]).concat(spec.blocks || [])};
   const addNode = (room, x, y, kind, extra) => { const n = {i: nav.nodes.length, room, x, y, kind, ...(extra || {})}; nav.nodes.push(n); nav.adj.push([]); nav.rooms[room].nodes.push(n.i); return n; };
   const link = (a, b, w, extra) => { nav.adj[a.i].push({to: b.i, w, ...(extra || {})}); nav.adj[b.i].push({to: a.i, w, ...(extra || {})}); };
   for (const [id, r] of Object.entries(spec.rooms)){ const R = nav.rooms[id] = {id, poly: r.poly, walk: r.walk, station: r.station, nodes: [], spots: []};
@@ -5008,7 +5166,7 @@ function buildMapDeck(){
   if (!n) card = `<b>SECTOR ${R.sector} OF ${SECTORS}${R.arc ? " · " + esc(R.arc.sectors[R.sector-1].name.toUpperCase()) : ""}</b><span>Tap a beacon to scan it. Every jump costs 1 fuel and lets ${esc(threatName())} close in. Reach the green EXIT beacon.${hunted ? " Your hull reads weak on their scopes: hunters will come looking." : ""}</span>`;
   else if (n.id === R.pos) card = `<b>YOU ARE HERE · ${esc(planetOf(n.seed).toUpperCase())}</b><span>${n.probed ? "You've already probed this world." : "Send a probe down and see what the world gives you. Free, and once per beacon."}</span>`;
   else if (n.col <= R.threat && n.type !== "flagship") card = `<b><span class="tag" style="color:#ff3d5a">OVERRUN</span>${esc(String(pursuer().name || threatName()).toUpperCase())}</b><span>${({fleet:"Its vanguard holds this beacon. A hard fight and nothing worth salvaging.", swarm:"The swarm has nested here. Expect a fight against something that doesn't need a crew.", nova:"The shockfront has burned through here. No enemy, just fire. You'd have to outlast it.", void:"The dark has taken this beacon. No enemy, just cold. You'd have to outlast it."})[pursuer().kind] || ""}</span>`;
-  else if (n.type === "hazard") card = `<b><span class="tag" style="color:#ffc857">HAZARD</span>${esc(({asteroids:"ASTEROID FIELD", flare:"SOLAR STORM", ion:"ION STORM"})[n.hz] || "HAZARD")}</b><span>Dangerous, and rich if you're willing to sit in it. You can pass it by. ${esc(planetOf(n.seed))}.</span>`;
+  else if (n.type === "hazard") card = `<b><span class="tag" style="color:#ffc857">HAZARD</span>${esc(({asteroids:"ASTEROID FIELD", flare:"SOLAR STORM", ion:"ION STORM"})[n.hz] || "HAZARD")}</b><span>Dangerous, and rich if you're willing to sit in it. You can pass it by. Near a ${esc(planetOf(n.seed))}.</span>`;
   else if (n.visited) card = `<b>VISITED</b><span>Empty space now. Jumping here still costs fuel and time.</span>`;
   else if (n.col <= R.threat + 1 && n.type !== "flagship" && n.type !== "exit" && reachable().includes(n.id)) card = `<b><span class="tag" style="color:#ff9b5c">PURSUIT</span>${esc(String(pursuer().name || threatName()).toUpperCase())} WILL BE HERE FIRST</b><span>Jump here and you meet the pursuit, not what the scanners show. Every jump lets it close in.</span>`;
   else if (n.type === "hostile"){ const s = scout(n); card = `<b><span class="tag" style="color:${s.danger[1]}">${s.danger[0]}</span>${esc(s.e.name)}</b><span>${sizeRule(s.e).label} ship · Hull ${s.e.hull} · ${(n_ => `${n_} shield layer${n_ === 1 ? "" : "s"}`)(Math.floor((s.e.sys.shields ? s.e.sys.shields.level : 0)/MOD.rules.powerPerLayer))} · ${s.e.weapons.map(w => w.name).join(", ")}${s.e.sys.cloak ? " · cloak" : ""}${s.e.sys.tele ? " · boarders" : ""}${s.e.sys.lock ? " · warp lock" : ""}${s.e.drones.length ? " · drones" : ""} · salvage ${s.loot}${s.e.notes.length ? "<br>Scouts: " + esc(s.e.notes.join(" ")) : ""}</span>`; }
@@ -7510,7 +7668,21 @@ const DIAG = {on: hashFlag("debug"), n: 0, t0: 0, fps: 0, el: null,
       ` · ${this.fps} fps · ${S ? S.mode : "-"}${ua ? " · " + ua[0] : ""}` + (lastError ? `\nlast error: ${lastError}` : "");
   }
 };
-addEventListener("hashchange", () => { DIAG.on = hashFlag("debug"); if (!DIAG.on && DIAG.el){ DIAG.el.remove(); DIAG.el = null; } });
+addEventListener("hashchange", () => { DIAG.on = hashFlag("debug"); if (!DIAG.on && DIAG.el){ DIAG.el.remove(); DIAG.el = null; } debugBar(); });
+/* #debug testing controls, for reaching later sectors in a test run: FF runs fights 8x, NEXT SECTOR leaves the map's sector */
+DIAG.ff = false;
+function debugBar(){
+  let bar = $("dbgBar");
+  if (!DIAG.on){ if (bar) bar.remove(); DIAG.ff = false; return; }
+  if (bar) return;
+  bar = document.createElement("div"); bar.id = "dbgBar";
+  bar.style.cssText = "position:fixed;left:50%;top:2px;transform:translateX(-50%) scale(.6);transform-origin:top center;z-index:9999;display:flex;gap:4px;opacity:.7"; // top middle, small: never over PLAY, crew cards or beacons
+  bar.innerHTML = `<button class="btn" id="dbgFF">FF x8: OFF</button><button class="btn" id="dbgSector">NEXT SECTOR</button>`;
+  document.body.appendChild(bar);
+  $("dbgFF").addEventListener("click", () => { DIAG.ff = !DIAG.ff; $("dbgFF").textContent = `FF x8: ${DIAG.ff ? "ON" : "OFF"}`; });
+  $("dbgSector").addEventListener("click", () => { if (!R || !S || S.mode !== "map" || R.sector >= SECTORS) return; closeSheet(); nextSector(); });
+}
+debugBar();
 function boot(data){
   set3D(STAGE.ok, STAGE.why);
   loadArt();
