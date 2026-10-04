@@ -255,8 +255,9 @@ body.land .sheet{align-items:center}
 /* ===== Sideways only (Michael, 2026-10-04: "the game is sideways only"). Held upright, the whole stage turns
    90 degrees so the game stays landscape relative to the phone; resize() sets the sizes, and every pointer
    handler maps its coordinates back through the turn (stagePt / stageRect in p3.js). */
-#stage{position:fixed;left:0;top:0;width:var(--sw,100vw);height:var(--sh,100vh);overflow:hidden;background:var(--void)}
-body.rot #stage{transform-origin:0 0;transform:translateX(var(--vw,100vw)) rotate(90deg)}
+#stage{position:fixed;left:0;top:0;width:var(--sw,100vw);height:var(--sh,100vh);overflow:hidden;background:var(--void);transform-origin:0 0}
+body.big #stage{transform:scale(var(--k,1))} /* iPad and desktop: the same layout, drawn bigger (resize() in p3.js) */
+body.rot #stage{transform-origin:0 0;transform:translateX(var(--vw,100vw)) rotate(90deg) scale(var(--k,1))}
 #stage #app{height:100%}
 
 /* ===== The cockpit skin (Michael's mockups, Gemini image-07/09/10/11): navy panels with glowing cyan edges,
@@ -442,6 +443,18 @@ body.land .hgCrew span{width:52px}body.land .hgCrew img{width:38px;height:38px}
 .panel.hasFoot > .btnRow{flex:none;padding-top:10px;border-top:1px solid rgba(63,200,236,.18);margin-top:6px}
 .opBar #opMyth{max-width:210px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .choice.picked{box-shadow:0 0 0 1px var(--gold) inset}
+
+/* ===== iPad and desktop (PILLARS 12): hover tooltips and the key list (src/platform.js) ===== */
+.tip{position:absolute;z-index:40;max-width:230px;display:grid;gap:2px;padding:7px 10px;border-radius:8px;background:rgba(6,12,22,.96);border:1px solid var(--edge);box-shadow:var(--glow),0 6px 18px rgba(0,0,0,.5);pointer-events:none;font:500 10.5px/1.35 var(--mono);color:#cfe6f5}
+.tip[hidden]{display:none}
+.tip b{font:700 11.5px/1.2 var(--display);letter-spacing:.1em;color:#eaf6ff}
+.tip i{font-style:normal;font-size:9.5px;color:var(--edge);opacity:.85}
+.tip .hit{font:700 11px/1.3 var(--display);letter-spacing:.06em;color:var(--gold)}
+.keyGrid{display:grid;gap:5px}
+.keyGrid h3{margin:6px 0 0}
+.keyRow{display:grid;grid-template-columns:minmax(150px,auto) 1fr;gap:12px;align-items:center;font-size:12px;color:#d7ecf8}
+.keyRow kbd{display:inline-block;min-width:16px;text-align:center;padding:2px 6px;margin:1px 0;border-radius:5px;border:1px solid var(--edgeDim);background:#0b1626;box-shadow:inset 0 -2px 0 rgba(63,200,236,.18);font:600 11px var(--display);color:#eaf6ff}
+.top #keysBtn{min-width:0}
 </style>
 
 <div id="stage"><!-- sideways only: when the phone is upright this whole stage turns 90 degrees (body.rot) -->
@@ -1598,8 +1611,15 @@ const $ = id => document.getElementById(id);
 // Sideways only (Michael, 2026-10-04). Upright, the stage is turned 90 degrees (body.rot), so screen points and
 // element boxes are mapped back into the stage's own landscape coordinates before any game maths uses them.
 const ROT = () => document.body.classList.contains("rot");
-function stagePt(cx, cy){ return ROT() ? {x: cy, y: innerWidth - cx} : {x: cx, y: cy}; }
-function stageRect(el){ const r = el.getBoundingClientRect(); return ROT() ? {left: r.top, top: innerWidth - r.right, width: r.height, height: r.width} : {left: r.left, top: r.top, width: r.width, height: r.height}; }
+// One game, three screens (PILLARS 12): a phone gets the approved layout as is; an iPad or a desktop gets the same
+// layout drawn bigger. The stage is laid out at (screen / UIK) and scaled up by UIK, so every panel, button and
+// the ship grow together and nothing moves. UIK = 1 on a phone (landscape height under 500 px).
+let UIK = 1;
+function uiScale(lw, lh){ return lh < 500 ? 1 : clamp(Math.min(lw/936, lh/433), 1, 2.4); }
+function stagePt(cx, cy){ const k = UIK; return ROT() ? {x: cy/k, y: (innerWidth - cx)/k} : {x: cx/k, y: cy/k}; }
+function stageRect(el){ const r = el.getBoundingClientRect(), k = UIK; return ROT() ? {left: r.top/k, top: (innerWidth - r.right)/k, width: r.height/k, height: r.width/k} : {left: r.left/k, top: r.top/k, width: r.width/k, height: r.height/k}; }
+// the other way: a stage point to the screen point under it (tests and tooltips use it)
+function viewPt(sx, sy){ const k = UIK; return ROT() ? {x: innerWidth - sy*k, y: sx*k} : {x: sx*k, y: sy*k}; }
 function localPt(e, el){ const p = stagePt(e.clientX, e.clientY), b = stageRect(el); return {x: p.x - b.left, y: p.y - b.top}; }
 const cv = $("cv"); let X = cv.getContext("2d");
 let W = 0, H = 0, DPR = 1, geo = null, stars = [], TS = 1;
@@ -1649,12 +1669,14 @@ function drawNebula(){
 
 function resize(){
   // the game is landscape only: held upright, the whole stage turns (CSS body.rot) and keeps its landscape size
-  const rot = innerHeight > innerWidth, de = document.documentElement.style;
-  document.body.classList.toggle("rot", rot); document.body.classList.add("land");
-  de.setProperty("--vw", innerWidth + "px"); de.setProperty("--vh", innerHeight + "px");
-  de.setProperty("--sw", (rot ? innerHeight : innerWidth) + "px"); de.setProperty("--sh", (rot ? innerWidth : innerHeight) + "px");
+  const rot = innerHeight > innerWidth, de = document.documentElement.style, lw = rot ? innerHeight : innerWidth, lh = rot ? innerWidth : innerHeight;
+  UIK = uiScale(lw, lh);
+  document.body.classList.toggle("rot", rot); document.body.classList.add("land"); document.body.classList.toggle("big", UIK > 1);
+  de.setProperty("--vw", innerWidth + "px"); de.setProperty("--vh", innerHeight + "px"); de.setProperty("--k", UIK);
+  de.setProperty("--sw", lw/UIK + "px"); de.setProperty("--sh", lh/UIK + "px");
   const fe = cv.parentElement;
-  DPR = Math.min(2, window.devicePixelRatio || 1);
+  DPR = Math.min(4, Math.min(2, window.devicePixelRatio || 1)*UIK); // the canvases are drawn at the scaled-up size, so they stay sharp
+  if (STAGE.ok && STAGE.pixelRatio) STAGE.pixelRatio(Math.min(window.devicePixelRatio || 1, 1.75)*UIK);
   W = fe.clientWidth; H = fe.clientHeight; cv.width = W*DPR; cv.height = H*DPR;
   X.setTransform(DPR,0,0,DPR,0,0);
   stars = Array.from({length:140}, () => ({x:Math.random()*W, y:Math.random()*H, z:rnd(.2,1)}));
@@ -1679,7 +1701,7 @@ function layout(){
     if (S.foe.env){ g.you = fitShip(S.you, {x: Lw, y: T, w: W - Lw - 16, h: H - T - B}); g.foe = {cell: 1, ox: -9999, oy: -9999}; S.inset = null; }
     else { const other = foc === "you" ? "foe" : "you", kit = S[foc].cut && S[foc].cut.kit;
       // a kit ship (the scout): the whole hull, wing tip to wing tip, sits above the crew portraits
-      if (kit){ const el = $("crew"), cr = el && el.getBoundingClientRect(), cb = cv.getBoundingClientRect(), bot = cr && cr.height ? (cr.top - cb.top)/TS - 4 : H - B; big.y = 18; big.h = Math.max(120, bot - 18); }
+      if (kit){ const el = $("crew"), cr = el && stageRect(el), cb = stageRect(cv), bot = cr && cr.height ? (cr.top - cb.top)/TS - 4 : H - B; big.y = 18; big.h = Math.max(120, bot - 18); }
       g[foc] = fitShip(S[foc], big, true); g[other] = fitShip(S[other], small); S.inset = {...small, key: other};
       // the whole ship stays clear of the swap window (a painted hull by its own outline; others by their rooms): shrink until it does
       if (kit) for (let k = 0; k < 5; k++){ geo = g; const sh = S[foc], ca = cutArt(sh), rec = sh.cut && SHAPED[sh.cut.art]; if (!ca) break; let over = 0;
@@ -2140,7 +2162,7 @@ function drawDeck(ship, dt){
   const g = G(ship), ca = cutArt(ship);
   const b = ca ? {x: ca.x, y: ca.y, w: ca.im.w*ca.s, h: ca.im.h*ca.s} : shipBox(ship), m = ca ? 2 : Math.round(g.cell*0.7);
   const dc = ship._deckC instanceof HTMLCanvasElement ? ship._deckC : (ship._deckC = document.createElement("canvas")); // a reloaded save can hold a dead {}
-  const k = Math.min(DPR, 2048/(b.w + 2*m), 2048/(b.h + 2*m)), dw = Math.ceil((b.w + 2*m)*k), dh = Math.ceil((b.h + 2*m)*k); // phones: keep textures at 2048 or less
+  const tx = UIK > 1 ? 3072 : 2048, k = Math.min(DPR, tx/(b.w + 2*m), tx/(b.h + 2*m)), dw = Math.ceil((b.w + 2*m)*k), dh = Math.ceil((b.h + 2*m)*k); // phones: keep textures at 2048 or less
   if (dc.width !== dw || dc.height !== dh){ dc.width = dw; dc.height = dh; }
   ship._deck = {c: dc, x: b.x - m, y: b.y - m, w: b.w + 2*m, h: b.h + 2*m};
   const X0 = X; X = dc.getContext("2d");
@@ -2514,15 +2536,7 @@ cv.addEventListener("pointerdown", e => {
   }
   if (fr && S.selW === null) setHint("Pick a weapon first, then tap the room to hit.");
 });
-addEventListener("keydown", e => {
-  if (e.target.tagName === "TEXTAREA") return;
-  AUDIO.unlock();
-  if (S && S.mode === "fight"){
-    if (e.code === "Space"){ e.preventDefault(); togglePause(); }
-    const n = parseInt(e.key); if (n >= 1 && n <= 4) weaponTap(n-1);
-    if (e.key === "c") actCloak(); if (e.key === "b") actBoard(); if (e.key === "j") actJump(); if (e.key === "v") actVent();
-  } else if (S && S.mode === "map" && e.key === "Enter"){ doJump(); }
-});
+// keyboard: the whole scheme (space, 1-4, A/S/D/F..., Esc, Enter, Tab) lives in src/platform.js
 
 /* ---------------- deck (DOM) ---------------- */
 function pips(n, on, dmg, ion){ let h = '<span class="pw">'; for (let i = 0; i < n; i++) h += `<b class="${i >= n - dmg ? "dmg" : (i < on ? (ion && i === on-1 ? "ion" : "on") : "")}"></b>`; return h + "</span>"; }
@@ -2604,7 +2618,7 @@ function tickDeck(){
     el.style.setProperty("--p", (w.charge/w.cd).toFixed(3)); el.style.setProperty("--ring", ready ? "#7cf29a" : w.on ? "#ffc857" : "#3a4c6b");
     const ammo = w.type === "missile" ? ` · ${you.missiles} left` : "";
     const stat = w.type === "ion" ? `ion ${w.ion || 1}` : w.type === "beam" ? `${w.dmg}×${w.len || 1} rooms` : `${w.shots}×${w.dmg}`;
-    $("ws"+i).textContent = !w.on ? `offline · ${stat} · tap to power` : (S.foe.cloakT > 0 ? "no lock: target cloaked" : (w.target ? `→ ${SYS_LABEL[w.target] || w.target.toUpperCase()} · ${stat}${ammo}${w.chain && w.stack ? ` · chain ${w.stack}` : ""}` : `no target · ${stat}${ammo}`));
+    setText($("ws"+i), !w.on ? `offline · ${stat} · tap to power` : (S.foe.cloakT > 0 ? "no lock: target cloaked" : (w.target ? `→ ${SYS_LABEL[w.target] || w.target.toUpperCase()} · ${stat}${ammo}${w.chain && w.stack ? ` · chain ${w.stack}` : ""}` : `no target · ${stat}${ammo}`)));
   });
   for (const id of POWERED){ const el = $("sp_"+id); if (el){ const s = you.sys[id], h = pips(s.level, eff(you,id), s.dmg, s.ion > 0); if (el.innerHTML !== h) el.innerHTML = h; const row = $("sy_"+id); if (row){ row.classList.toggle("off", eff(you,id) <= 0); row.classList.toggle("hurt", s.dmg > 0); } } }
   syncSensBtn();
@@ -2612,7 +2626,7 @@ function tickDeck(){
   const free = reactorFree(you);
   { const h = `${pips(you.reactor, free, 0)} ${free} FREE`; if ($("reactor").innerHTML !== h) $("reactor").innerHTML = h; }
   const ACT = {walk:"moving", fight:"fighting", repair:"repairing", fire:"fighting fire", seal:"sealing breach", man:"manning", idle:"in"};
-  you.crew.forEach((c,i) => { const el = $("cs"+i), hb = $("ch"+i); if (el) el.textContent = c.hp <= 0 ? "lost" : c.on === "you" && S.you.o2 && (S.you.o2[c.room] ?? 100) < MOD.rules.o2Suffocate && !SP(c).nobreath ? `NO AIR · ${(SYS_LABEL[c.room] || c.room).toLowerCase()}` : `${c.on === "foe" ? "aboard · " : ""}${ACT[c.act] || "in"} ${(SYS_LABEL[c.dest] || c.dest).toLowerCase()}${c.grief > 0 ? " · grieving" : ""}`; if (hb){ hb.style.width = `${100*clamp(c.hp/c.maxHp,0,1)}%`; hb.style.background = c.hp/c.maxHp > .5 ? "var(--power)" : "var(--foe)"; } });
+  you.crew.forEach((c,i) => { const el = $("cs"+i), hb = $("ch"+i); if (el) setText(el, c.hp <= 0 ? "lost" : c.on === "you" && S.you.o2 && (S.you.o2[c.room] ?? 100) < MOD.rules.o2Suffocate && !SP(c).nobreath ? `NO AIR · ${(SYS_LABEL[c.room] || c.room).toLowerCase()}` : `${c.on === "foe" ? "aboard · " : ""}${ACT[c.act] || "in"} ${(SYS_LABEL[c.dest] || c.dest).toLowerCase()}${c.grief > 0 ? " · grieving" : ""}`); if (hb){ hb.style.width = `${100*clamp(c.hp/c.maxHp,0,1)}%`; hb.style.background = c.hp/c.maxHp > .5 ? "var(--power)" : "var(--foe)"; } });
   const c = $("aCloak");
   if (c){ const on = you.cloakT > 0; c.disabled = !on && (you.cloakCd > 0 || eff(you,"cloak") <= 0); c.firstChild.textContent = on ? `CLOAKED ${Math.ceil(you.cloakT)}s` : (you.cloakCd > 0 ? `CLOAK ${Math.ceil(you.cloakCd)}s` : "CLOAK"); $("bCloak").style.width = `${on ? 100*you.cloakT/(MOD.rules.cloakTime*Math.max(1,eff(you,"cloak"))) : 100*(1 - you.cloakCd/MOD.rules.cloakCooldown)}%`; }
   const bd = $("aBoard");
@@ -2625,8 +2639,11 @@ function tickDeck(){
     $("bBoard").style.width = `${100*you.teleCharge}%`;
   }
   const j = $("aJump"); j.disabled = you.ftl < 1; j.firstChild.textContent = you.ftl >= 1 ? "JUMP AWAY" : warpLocked(you) ? "WARP LOCKED" : `FTL ${Math.round(you.ftl*100)}%`; $("bJump").style.width = `${100*you.ftl}%`;
-  const go = $("go"); go.textContent = S.paused ? "▶ RESUME" : "❚❚ PAUSE"; go.className = `go${S.paused ? "" : " running"}`;
+  const go = $("go"); setText(go, S.paused ? "▶ RESUME" : "❚❚ PAUSE"); go.className = `go${S.paused ? "" : " running"}`;
 }
+// Write a button's text only when it changes. Rewriting it every frame swaps the text node under the mouse, and
+// WebKit then drops the click (a mouse press and release a frame apart lost RESUME, a crew card, a weapon).
+function setText(el, t){ if (el && el.textContent !== t) el.textContent = t; }
 // the top bar's resources, as in the concept art: hull, scrap, fuel, missiles
 function hudRes(){ const h = $("hudRes"); if (!h || !R) return; const y = R.you;
   const t = `<span class="${y.hull <= y.maxHull*0.3 ? "lo" : ""}">HULL:<b>${y.hull}/${y.maxHull}</b></span><span>SCRAP:<b>${R.scrap}</b></span><span class="${R.fuel <= 2 ? "lo" : ""}">FUEL:<b>${R.fuel}</b></span><span>MISSILES:<b>${y.missiles}</b></span>`;
@@ -3287,6 +3304,7 @@ const STAGE = (() => {
     why: "",
     info: () => ({w: renderer.domElement.width, h: renderer.domElement.height, dpr: renderer.getPixelRatio(), calls: renderer.info.render.calls, tris: renderer.info.render.triangles}),
     resize,
+    pixelRatio(pr){ pr = Math.min(pr, 3.5); if (Math.abs(renderer.getPixelRatio() - pr) < 1e-3) return; renderer.setPixelRatio(pr); w3 = h3 = 0; }, // the stage scaled up on an iPad or desktop
     setBeacon,
     beaconName: () => beacon ? beacon.name : "",
     setMode(m){ mode = m; if (m === "map") chartKey = ""; if (m !== "fight") cine = null; },
@@ -3496,9 +3514,14 @@ const HULLS = {};
 function artKey(ship){ return ship.you ? (ship.art || ship.defId || "") : (ship.art || String(ship.name || "").toLowerCase().replace(/^the /, "")); }
 function hullSprite(key){
   if (SHAPED[key]) return SHAPED[key];
-  const url = ART.ships && ART.ships[key]; if (!url) return null;
+  const base = ART.ships && ART.ships[key]; if (!base) return null;
+  // an iPad or a desktop draws the ship big: there a hull with an _hd twin (exactly 2x, same crop) loads that, and
+  // keeps w/h (and every coordinate) in the normal hull's pixels; q says how many canvas pixels make one of them
+  const hd = typeof UIK !== "undefined" && UIK > 1 && ART.ships[key + "_hd"], url = hd || base, q = hd ? 2 : 1;
   let h = HULLS[url];
-  if (!h){ h = HULLS[url] = {ready:false}; const im = new Image(); im.onload = () => { try { Object.assign(h, cutHull(im), {ready:true}); } catch (e) { h.failed = true; } if (chooseShip.redraw) chooseShip.redraw(); if (typeof layout === "function") layout(); }; im.src = url; }
+  if (!h){ h = HULLS[url] = {ready:false}; const im = new Image(); im.onload = () => { try { const r = cutHull(im);
+      if (q > 1){ r.w /= q; r.h /= q; r.q = q; for (const b of [r.core, r.box]) if (b) for (const k of ["x", "y", "w", "h"]) b[k] /= q; if (r.core) r.core.area /= q*q; }
+      Object.assign(h, r, {ready:true}); } catch (e) { h.failed = true; } if (chooseShip.redraw) chooseShip.redraw(); if (typeof layout === "function") layout(); }; im.src = url; }
   return h.ready ? h : null;
 }
 // Rooms cut out of the hull (Michael, 2026-10-03: "the rooms have to be the shape of a hull"; "better larger
@@ -4022,8 +4045,9 @@ function kitShape(ship){
 // (lights and hazards clip to it), its walk rectangle (where crew stand), the plinth where its upgrade-tier
 // machine goes, and its station: the spot, facing and pose of whoever works it.
 function buildKitPainted(ship, kd, hs, R){
-  const w = hs.w, h = hs.h, flip = !ship.you, c = document.createElement("canvas"); c.width = w; c.height = h;
-  const x = c.getContext("2d"); x.save(); if (flip){ x.translate(w, 0); x.scale(-1, 1); } x.drawImage(hs.c, 0, 0); x.restore();
+  // q: canvas pixels per painting pixel (2 with the full-size painting on an iPad or a desktop); every coordinate stays in w x h
+  const w = hs.w, h = hs.h, q = hs.q || 1, flip = !ship.you, c = document.createElement("canvas"); c.width = Math.round(w*q); c.height = Math.round(h*q);
+  const x = c.getContext("2d"); x.save(); x.scale(q, q); if (flip){ x.translate(w, 0); x.scale(-1, 1); } x.drawImage(hs.c, 0, 0, w, h); x.restore();
   // the standard (MOD.standard) in this painting's pixels: R.tile is one door opening; crew size follows from it
   const std = MOD.standard || DEFAULT_MOD.standard, tile = R.tile, fig = (CREW2.idx && CREW2.idx.fig) || 0.6;
   kd = {...kd, crew: std.crew.height*tile/(fig*1.02)}; // the crew cell, so a standing human is std.crew.height tiles
@@ -4045,14 +4069,14 @@ function buildKitPainted(ship, kd, hs, R){
   const f = kd.fit, hb = f ? [flip ? w - f[0] - f[2] : f[0], f[1], f[2], f[3]] : [0, 0, w, h];
   // the painted doors, working like standard doors: the painting's own door pixels slide open into the jambs
   const doors = (R.doors || []).filter(d => ship.layout.some(q => q.id === d.a) && ship.layout.some(q => q.id === d.b)).map(d => {
-    const [rx, ry, rw, rh] = d.rect, X0 = flip ? w - rx - rw : rx, art = document.createElement("canvas"); art.width = Math.ceil(rw); art.height = Math.ceil(rh);
-    art.getContext("2d").drawImage(c, X0, ry, rw, rh, 0, 0, rw, rh); // its closed look, from the painting
+    const [rx, ry, rw, rh] = d.rect, X0 = flip ? w - rx - rw : rx, art = document.createElement("canvas"); art.width = Math.ceil(rw*q); art.height = Math.ceil(rh*q);
+    art.getContext("2d").drawImage(c, X0*q, ry*q, rw*q, rh*q, 0, 0, rw*q, rh*q); // its closed look, from the painting
     return {a: d.a, b: d.b, vert: d.vert, rect: [X0, ry, rw, rh], art, painted: true}; });
   // the hull's right edge on every row (layout keeps it clear of the swap window)
-  const al = x.getImageData(0, 0, w, h).data, rowR = new Float32Array(h);
-  for (let yy = 0; yy < h; yy++){ let r = -1; for (let xx = w - 1; xx >= 0; xx--) if (al[(yy*w + xx)*4 + 3] > 60){ r = xx; break; } rowR[yy] = r; }
+  const cw = c.width, al = x.getImageData(0, 0, cw, c.height).data, rowR = new Float32Array(h);
+  for (let yy = 0; yy < h; yy++){ const row = Math.min(c.height - 1, Math.floor(yy*q)); let r = -1; for (let xx = cw - 1; xx >= 0; xx--) if (al[(row*cw + xx)*4 + 3] > 60){ r = xx/q; break; } rowR[yy] = r; }
   const hatches = (R.hatches || []).filter(t => polys[t.a] && polys[t.b]).map(t => ({a: t.a, b: t.b, x: fx(t.x)}));
-  return {c, w, h, ready: true, rooms, paths, bbs, kit, cell, hb, doors, rowR, polys, hatches, kd: {painted: true, crew: kd.crew, tile, flip, w, cell}, nest: R.nest};
+  return {c, w, h, q, ready: true, rooms, paths, bbs, kit, cell, hb, doors, rowR, polys, hatches, kd: {painted: true, crew: kd.crew, tile, flip, w, cell}, nest: R.nest};
 }
 // the station a crew member is working at: whoever holds it (src/crewnav.js navHolder, the first crew member headed
 // there who can work it), once they have walked onto its spot and stopped (idle at their post when a fight opens paused)
@@ -4261,7 +4285,7 @@ function kitDoorsDraw(ship){
       const o = d.o*0.8, A = d.art;
       X.save(); X.beginPath(); X.rect(sx, sy, sw, shh); X.clip();
       // the floor beyond the door, from the painting beside it (left of a vertical door, above a horizontal one)
-      if (d.vert) X.drawImage(sh.c, Math.max(0, rx - rw*2), ry, rw, rh, sx, sy, sw, shh); else X.drawImage(sh.c, rx, Math.max(0, ry - rh), rw, rh, sx, sy, sw, shh);
+      const qq = sh.q || 1; if (d.vert) X.drawImage(sh.c, Math.max(0, rx - rw*2)*qq, ry*qq, rw*qq, rh*qq, sx, sy, sw, shh); else X.drawImage(sh.c, rx*qq, Math.max(0, ry - rh)*qq, rw*qq, rh*qq, sx, sy, sw, shh);
       X.fillStyle = "rgba(0,0,0,.25)"; X.fillRect(sx, sy, sw, shh);
       if (d.vert){ const hh = A.height/2; X.drawImage(A, 0, 0, A.width, hh, sx, sy - shh/2*o, sw, shh/2); X.drawImage(A, 0, hh, A.width, hh, sx, sy + shh/2 + shh/2*o, sw, shh/2); }
       else { const hw = A.width/2; X.drawImage(A, 0, 0, hw, A.height, sx - sw/2*o, sy, sw/2, shh); X.drawImage(A, hw, 0, hw, A.height, sx + sw/2 + sw/2*o, sy, sw/2, shh); }
@@ -6263,6 +6287,222 @@ Return ONLY a JSON object, no markdown: {"summary": "one or two plain sentences 
   }
 }
 $("aiBtn").addEventListener("click", () => { AUDIO.unlock(); openAI(); });
+
+/* ============================================================
+   PLATFORMS (PILLARS 12, Michael 2026-10-04: "mobile, iPad and desktop"; "I don't want to move things").
+   One landscape game. A phone keeps the approved layout as is; an iPad or a desktop gets the same layout
+   scaled up (resize() in p3.js). This part adds what a mouse and a keyboard bring, FTL-style:
+     mouse   click = tap; hover shows what a system, weapon, crew member or room is (and the hit chance on an
+             enemy room with a weapon picked); right-click cancels a pick, or takes a bar of power off a
+             system (and powers a weapon down) as in FTL; the wheel scrolls sheets and zooms the map
+     keys    Space pause · 1-4 weapons · A S D F G H K L systems (Shift lowers) · C cloak · B board · V vent
+             J jump away · Tab swap the big ship · Esc close / cancel · Enter confirm · 1-9 answer an event
+             · ? the key list
+   Touch is untouched: everything here listens for a mouse or a key only.
+   ============================================================ */
+const SYS_KEYS = {shields: "A", engines: "S", medbay: "D", oxygen: "F", tele: "G", cloak: "H", drones: "K", lock: "L"};
+const KEY_SYS = Object.fromEntries(Object.entries(SYS_KEYS).map(([id, k]) => [k, id]));
+const SYS_WHAT = {shields: "Every 2 bars raise one shield layer. Each layer stops one laser shot.", engines: "Dodge chance and how fast the FTL drive spools.",
+  medbay: "Heals crew standing in it.", oxygen: "Refills the air in every room.", cloak: "Cloak: +evasion and their guns can't lock on.",
+  drones: "Powers your drones.", tele: "Charges the teleporter for boarding.", lock: "Holds the enemy's FTL drive.",
+  weapons: "Powers your weapons.", pilot: "Someone at the helm lets the ship dodge.", sensors: "See inside the enemy ship.", doors: "Doors slow boarders and fire."};
+const BTN_TIPS = {go: "Pause or resume the fight · Space", aVent: "Open airlocks: tap rooms to vent them · V", aJump: "Spool the FTL drive and jump away · J",
+  aCloak: "Cloak · C", aBoard: "Send a boarding party · B", sensBtn: "Swap which ship is big · Tab", viewBtn: "Camera view", sndBtn: "Sound on or off",
+  keysBtn: "Keyboard shortcuts · ?", shipBtn: "Upgrades and weapons", probeBtn: "Probe this world (once per beacon)", jumpBtn: "Jump to the picked beacon · Enter"};
+const PLAT = {mouse: matchMedia("(hover: hover) and (pointer: fine)").matches, keys: false};
+
+/* ---------- the KEYS button and sheet ---------- */
+(function keysButton(){
+  const b = document.createElement("button"); b.className = "topBtn"; b.id = "keysBtn"; b.textContent = "KEYS"; b.setAttribute("aria-label", "Keyboard shortcuts");
+  b.hidden = !PLAT.mouse; // a phone never shows it; an iPad shows it once a keyboard is used
+  $("sndBtn").after(b); b.addEventListener("click", () => { AUDIO.sfx("click"); showKeys(); });
+})();
+function showKeys(){
+  const row = (k, what) => `<div class="keyRow"><span>${k.split(" ").map(x => `<kbd>${x}</kbd>`).join(" ")}</span><span>${what}</span></div>`;
+  const sys = POWERED.map(id => `${SYS_KEYS[id]}`).join(" ");
+  sheet(`<h2>KEYS</h2>
+    <div class="keyGrid">
+      <h3>FIGHT</h3>
+      ${row("Space", "pause / resume")}
+      ${row("1 2 3 4", "pick a weapon, then click an enemy room")}
+      ${row(sys, "power to shields, engines, medbay, oxygen, teleporter, cloak, drones, warp lock")}
+      ${row("Shift+A", "Shift with a system key takes a bar off")}
+      ${row("C B V J", "cloak · board · vent · jump away")}
+      ${row("Tab", "swap which ship is big")}
+      <h3>EVERYWHERE</h3>
+      ${row("Esc", "close the sheet, or cancel what you picked")}
+      ${row("Enter", "confirm: continue, done, launch, jump to the picked beacon")}
+      ${row("1 – 9", "answer an event")}
+      ${row("← →", "previous / next on the opening and in the hangar")}
+      <h3>MOUSE</h3>
+      ${row("Click", "the same as a tap")}
+      ${row("Right-click", "cancel a pick · on a system, one bar less · on a weapon, power it down")}
+      ${row("Hover", "what a system, weapon, crew member or room is; the hit chance with a weapon picked")}
+      ${row("Wheel", "scroll a sheet · zoom the map")}
+    </div>
+    <div class="btnRow"><button class="btn primary" id="done">DONE</button></div>`);
+  $("done").addEventListener("click", () => { AUDIO.sfx("click"); closeSheet(); });
+}
+
+/* ---------- keyboard ---------- */
+function sheetOpen(){ return !$("sheet").hidden; }
+function visBtn(sel){ const b = $("panel").querySelector(sel); return b && !b.disabled && b.offsetParent ? b : null; }
+function cancelPick(){
+  if (!S || S.mode !== "fight") return false;
+  const had = S.selW !== null || S.selC !== null || S.ventArm || S.boardArm;
+  if (S.ventArm) actVent(); // turns arming off and says so
+  S.selW = null; S.selC = null; S.boardArm = false; S.dragW = null;
+  if (had){ buildDeck(); setHint(""); }
+  return had;
+}
+addEventListener("keydown", e => {
+  if (e.target && (e.target.tagName === "TEXTAREA" || e.target.tagName === "INPUT")) return;
+  if (e.metaKey || e.ctrlKey || e.altKey) return; // leave the browser's own shortcuts alone
+  AUDIO.unlock();
+  if (!PLAT.keys){ PLAT.keys = true; $("keysBtn").hidden = false; } // an iPad with a keyboard: show the key list button
+  const k = e.key, K = k.length === 1 ? k.toUpperCase() : k, fight = S && S.mode === "fight" && !S.over;
+  const op = $("opening") && !$("opening").hidden;
+  if (k === "?" || k === "/"){ e.preventDefault(); if (sheetOpen() && /KEYS/.test(($("panel").querySelector("h2") || {}).textContent || "")) closeSheet(); else showKeys(); return; }
+  if (k === "Escape"){
+    e.preventDefault();
+    if (sheetOpen()){ const b = visBtn("#back, #done, #logDone, #close"); if (b) b.click(); return; }
+    if (cancelPick()) return;
+    if (S && S.mode === "map" && R && R.sel != null){ R.sel = null; buildMapDeck(); }
+    return;
+  }
+  if (k === "Enter"){
+    e.preventDefault();
+    if (sheetOpen()){ const b = visBtn("#cont") || visBtn("#done") || visBtn("#hgGo") || visBtn("#logDone");
+      if (b){ b.click(); return; }
+      const one = [...$("panel").querySelectorAll(".btnRow .btn.primary, .btnRow .go")].filter(x => !x.disabled && x.offsetParent); if (one.length === 1) one[0].click();
+      return; }
+    if (op){ const b = $("opCont") || $("opPlay"); if (b) b.click(); return; }
+    if (S && S.mode === "map"){ doJump(); return; }
+    return;
+  }
+  if (k === "ArrowLeft" || k === "ArrowRight"){
+    const d = k === "ArrowLeft" ? "Prev" : "Next";
+    if (sheetOpen() && $("hg" + d)){ e.preventDefault(); $("hg" + d).click(); return; }
+    if (op && $("op" + d)){ e.preventDefault(); if (!$("op" + d).disabled) $("op" + d).click(); return; }
+    return;
+  }
+  // number keys: an open sheet's choices (events, loot), else the weapons in a fight
+  const n = /^Digit[1-9]$/.test(e.code) ? +e.code.slice(5) : (/^[1-9]$/.test(k) ? +k : 0);
+  if (n && sheetOpen()){ const cs = [...$("panel").querySelectorAll(".choice")].filter(b => b.offsetParent);
+    const b = cs[n - 1]; if (b && !b.disabled){ e.preventDefault(); b.click(); } return; }
+  if (sheetOpen() || op) return;
+  if (!fight){ if (k === "Tab") e.preventDefault(); return; }
+  if (k === " " || e.code === "Space"){ e.preventDefault(); togglePause(); return; }
+  if (k === "Tab"){ e.preventDefault(); if (!S.foe.env){ swapFocus(); AUDIO.sfx("click"); } return; }
+  if (n >= 1 && n <= 4){ e.preventDefault(); weaponTap(n - 1); return; }
+  if (KEY_SYS[K] && S.you.sys[KEY_SYS[K]]){ e.preventDefault(); power(KEY_SYS[K], e.shiftKey ? -1 : 1); hideTip(); return; }
+  if (K === "C"){ actCloak(); return; } if (K === "B"){ actBoard(); return; } if (K === "J"){ actJump(); return; } if (K === "V"){ actVent(); return; }
+});
+
+/* ---------- mouse: right-click ---------- */
+// a right or middle press never acts as a tap (the system rows, weapons and the canvas all listen for pointer presses)
+for (const t of ["pointerdown", "pointerup"]) addEventListener(t, e => { if (e.pointerType === "mouse" && e.button !== 0) e.stopPropagation(); }, true);
+$("stage").addEventListener("contextmenu", e => {
+  if (e.target && (e.target.tagName === "TEXTAREA" || e.target.tagName === "INPUT")) return;
+  e.preventDefault();
+  if (sheetOpen()) return;
+  const t = e.target instanceof Element ? e.target : null;
+  if (S && S.mode === "fight" && !S.over){
+    const row = t && t.closest(".sys"); if (row && row.dataset.s){ power(row.dataset.s, -1); showTipFor(row, e); return; }
+    const wb = t && t.closest(".wep"); if (wb && wb.dataset.i != null){ const i = +wb.dataset.i, w = S.you.weapons[i];
+      if (S.selW === i){ S.selW = null; buildDeck(); setHint(""); return; }
+      if (w && w.on){ w.on = false; w.want = false; buildDeck(); setHint(`${w.name} powered down.`); AUDIO.sfx("click"); } return; }
+    if (!cancelPick()) setHint("");
+    return;
+  }
+  if (S && S.mode === "map" && R && R.sel != null){ R.sel = null; buildMapDeck(); }
+});
+
+/* ---------- mouse: hover tooltips ---------- */
+const TIP = (() => { const t = document.createElement("div"); t.id = "tip"; t.className = "tip"; t.hidden = true; t.setAttribute("role", "tooltip"); $("stage").appendChild(t); return t; })();
+let tipAt = null;
+function hideTip(){ if (!TIP.hidden){ TIP.hidden = true; } tipAt = null; }
+function placeTip(html, e){
+  if (!html){ hideTip(); return; }
+  if (TIP.innerHTML !== html) TIP.innerHTML = html;
+  TIP.hidden = false;
+  const p = stagePt(e.clientX, e.clientY), sw = $("stage").clientWidth, sh = $("stage").clientHeight, w = TIP.offsetWidth, h = TIP.offsetHeight;
+  let x = p.x + 14, y = p.y + 16; if (x + w > sw - 4) x = p.x - w - 12; if (y + h > sh - 4) y = p.y - h - 12;
+  TIP.style.left = Math.max(4, x) + "px"; TIP.style.top = Math.max(4, y) + "px";
+}
+const pct = v => `${Math.round(v)}%`;
+function sysTip(id){
+  const you = S.you, s = you.sys[id]; if (!s) return "";
+  const c = cap(you, id), k = SYS_KEYS[id];
+  return `<b>${SYS_LABEL[id] || id.toUpperCase()}</b><span>Power ${s.power} of ${c}${s.level !== c ? ` (level ${s.level}, ${s.level - c} damaged)` : ` · level ${s.level}`}${s.ion > 0 ? " · ionized" : ""}</span>`
+    + `<span>${SYS_WHAT[id] || ""}</span>` + (k ? `<i>${k} more power · Shift+${k} less · right-click less</i>` : "");
+}
+function wepTip(i){
+  const w = S.you.weapons[i]; if (!w) return "";
+  const what = w.type === "beam" ? `beam, ${w.dmg} damage a room across ${w.len || 1} room${(w.len || 1) > 1 ? "s" : ""}` : w.type === "ion" ? `ion ${w.ion || 1}: locks shields or a system` : `${w.shots} shot${w.shots > 1 ? "s" : ""} × ${w.dmg} damage${w.type === "missile" ? ", passes shields" : ""}`;
+  const st = !w.on ? "off" : w.charge >= w.cd ? "ready" : `charging ${pct(100*w.charge/w.cd)}`;
+  return `<b>${esc(w.name)}</b><span>${w.type.toUpperCase()} · ${what}</span><span>${w.power} power · ${w.cd}s · ${st}${w.target ? ` · aimed at ${SYS_LABEL[w.target] || w.target}` : ""}</span>`
+    + `<i>${i < 4 ? `key ${i + 1} · ` : ""}click, then an enemy room · right-click ${w.on ? "powers it down" : "—"}</i>`;
+}
+function crewTip(i){
+  const c = S.you.crew[i]; if (!c) return "";
+  const sk = SKILLS.map(s => [s, lvl(c, s)]).filter(([, l]) => l > 0).map(([s, l]) => `${s} ${"★".repeat(l)}`).join(" · ");
+  return `<b>${esc(c.name)}</b><span>${SP(c).name} · ${Math.max(0, Math.round(c.hp))}/${c.maxHp} hp · ${c.on === "foe" ? "aboard the enemy, " : ""}${(SYS_LABEL[c.room] || c.room || "").toLowerCase()}</span>${sk ? `<span>${sk}</span>` : ""}<i>click, then a room to send them</i>`;
+}
+function hitTip(w){
+  const foe = S.foe, ev = evasion(foe);
+  if (w.type === "beam") return `<span class="hit">Beams never miss · each shield layer takes 1 off its damage (${foe.layers} up)</span>`;
+  const sh = w.type === "missile" || (w.sp || 0) >= foe.layers ? "passes their shields" : `their ${foe.layers} shield layer${foe.layers > 1 ? "s" : ""} stop${foe.layers > 1 ? "" : "s"} the first ${foe.layers === 1 ? "shot" : foe.layers + " shots"}`;
+  return `<span class="hit">${pct(100 - ev)} to hit · ${sh}</span>`;
+}
+function roomTip(ship, rid){
+  const s = ship.sys[rid], who = allCrew().filter(c => c.on === ship.key && c.room === rid && c.hp > 0), hz = (ship.hz || {})[rid] || {}, air = ship.o2 ? ship.o2[rid] : null;
+  const mine = ship.you, seen = mine || seeFoe();
+  let h = `<b>${mine ? "" : "ENEMY · "}${SYS_LABEL[rid] || (rid === "hall" ? "CORRIDOR" : String(rid).toUpperCase())}</b>`;
+  if (s && seen) h += `<span>${mine ? `power ${s.power ?? cap(ship, rid)} of ${cap(ship, rid)}` : `level ${s.level}`}${s.dmg > 0 ? ` · ${s.dmg} damaged` : ""}${s.ion > 0 ? " · ionized" : ""}</span>`;
+  if (seen && who.length) h += `<span>${who.map(c => esc(c.name || SP(c).name)).join(", ")}</span>`;
+  const bad = [hz.fire > 0 ? "fire" : "", hz.breach > 0 ? "hull breach" : "", ship.vent && ship.vent[rid] ? "venting" : ""].filter(Boolean);
+  if (seen && (air != null || bad.length)) h += `<span>${air != null ? `air ${pct(air)}` : ""}${bad.length ? (air != null ? " · " : "") + bad.join(" · ") : ""}</span>`;
+  if (!mine && S.selW !== null && S.you.weapons[S.selW]) h += hitTip(S.you.weapons[S.selW]);
+  else if (!mine) h += `<i>pick a weapon (1-4), then click here</i>`;
+  else if (S.selC !== null) h += `<i>click to send ${esc(S.you.crew[S.selC].name)} here</i>`;
+  return h;
+}
+function canvasTip(e){
+  if (!S || S.mode !== "fight" || !geo || S.over) return "";
+  const lp = localPt(e, cv), x = lp.x, y = lp.y/TS, ins = S.inset;
+  let ship = null;
+  if (ins && !S.foe.env && x >= ins.x && x <= ins.x + ins.w && y >= ins.y && y <= ins.y + ins.h) ship = S[ins.key];
+  const fr = !S.foe.env && (!ship || ship === S.foe) ? roomAt(S.foe, x, y) : null, yr = !ship || ship === S.you ? roomAt(S.you, x, y) : null;
+  cv.style.cursor = fr && S.selW !== null ? "crosshair" : (fr || yr) ? "pointer" : "";
+  if (fr) return roomTip(S.foe, fr);
+  if (yr) return roomTip(S.you, yr);
+  if (ship) return `<b>${ship.you ? "YOUR SHIP" : "ENEMY SHIP"}</b><i>click to make it the big one · Tab</i>`;
+  return "";
+}
+function tipFor(el, e){
+  if (!el) return "";
+  if (el === cv) return canvasTip(e);
+  if (!S || S.mode !== "fight"){ const id = el.id; return BTN_TIPS[id] ? `<span>${BTN_TIPS[id]}</span>` : ""; }
+  const sys = el.closest(".sys"); if (sys) return sysTip(sys.dataset.s);
+  const wep = el.closest(".wep"); if (wep) return wepTip(+wep.dataset.i);
+  const cr = el.closest(".crewCard"); if (cr) return crewTip(+cr.dataset.c);
+  const b = el.closest("button"); if (b && BTN_TIPS[b.id]) return `<span>${BTN_TIPS[b.id]}</span>`;
+  return "";
+}
+function showTipFor(el, e){ placeTip(tipFor(el, e), e); }
+addEventListener("pointermove", e => {
+  if (e.pointerType !== "mouse"){ return; }
+  if (!PLAT.mouse){ PLAT.mouse = true; $("keysBtn").hidden = false; }
+  if (sheetOpen() || ($("opening") && !$("opening").hidden) || e.buttons){ hideTip(); return; }
+  const t = e.target instanceof Element ? e.target : null;
+  const el = t && (t === cv ? cv : t.closest(".sys, .wep, .crewCard, button"));
+  tipAt = el; showTipFor(el, e);
+}, {passive: true});
+addEventListener("pointerdown", e => { if (e.pointerType === "mouse") setTimeout(() => { if (tipAt) hideTip(); }, 0); }, true);
+document.addEventListener("pointerleave", hideTip);
+// live: the tooltip keeps up with the fight (charge, power, hit chance) while the mouse rests
+setInterval(() => { if (!TIP.hidden && tipAt && tipAt !== cv && S && S.mode === "fight"){ const r = tipAt.isConnected ? tipFor(tipAt) : ""; if (!r) hideTip(); else if (TIP.innerHTML !== r) TIP.innerHTML = r; } }, 250);
 
 /* ============================================================
    SOUND — an adaptive score in the FTL manner: every sector has

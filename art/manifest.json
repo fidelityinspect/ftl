@@ -499,6 +499,15 @@
    "source": "Michael's Gemini chat (the Kestrel's interior painted with its crew, then emptied to plinths), cut by tools/ship_kit.py painted"
   },
   {
+   "group": "ships",
+   "id": "hull_kestrel_hd",
+   "file": "hull_kestrel_hd.png",
+   "width": 2620,
+   "height": 1394,
+   "at": "2026-10-04",
+   "source": "the same painted Kestrel at the painting's full size, same crop (tools/ship_kit.py painted-hd); loaded only on an iPad or a desktop so the ship stays sharp drawn big"
+  },
+  {
    "group": "kit",
    "id": "hull_kestrel_rooms",
    "index": "hull_kestrel.json",
