@@ -590,7 +590,7 @@ body.ftBeat #deckFight, body.ftBeat #sensBtn{visibility:hidden}
    The Ship's AI rewrites this object; the engine below reads it.
    ============================================================ */
 const DEFAULT_MOD = {
-  version: 7,
+  version: 8,
   rules: {
     shieldRecharge: 2.0,       // seconds to restore one shield layer (used only if shieldRechargeByLayer is missing)
     shieldRechargeByLayer: [2.0, 2.0, 1.72, 1.5, 1.33], // seconds to raise layer 1, 2, 3, 4, 5 (FTL S2); a hit keeps the progress made (S6)
@@ -629,6 +629,10 @@ const DEFAULT_MOD = {
     enemyDefendOdds: 1.2,      // enemy defenders gather until they are this much stronger than the boarders in a room (ESTIMATE)
     stalemateTime: 60,         // seconds with no hull damage on either side before the enemy gives up and jumps (FTL A6); +2 fuel
     stalemateFuel: 2,
+    lockHold: 40,              // seconds a warp lock holds a drive before it overheats (COMBAT-RULES LO1); the held drive keeps spooling
+    lockCool: 15,              // seconds an overheated warp lock stays down
+    // a wreck's scrap: (lootBase + tier x lootPerTier) x size x (1 + lootSectorMult per sector past the first) + sector x lootPerSector
+    lootBase: 10, lootPerTier: 7, lootPerSector: 2, lootSectorMult: 1.6,
     cloakTime: 5,              // seconds of cloak per level
     cloakCooldown: 20,         // FTL L2
     cloakEvasion: 60,
@@ -735,9 +739,11 @@ const DEFAULT_MOD = {
   player: {
     id:"kestrel", name:"KESTREL", class:"Cruiser", size:"small", blurb:"Balanced. One shield layer, a burst laser and a missile launcher, and one bar of power short: choose what runs.",
     hull:30, reactor:8, missiles:8,
-    // the real Kestrel (FTL PLAYER_SHIP_HARD): 8 reactor bars for 9 bars of systems, so the first call of every run is what to switch off
+    // the real Kestrel (FTL PLAYER_SHIP_HARD): 8 reactor bars for 9 bars of systems, so the first call of every run is what to switch off.
+    // Playable v1 (2026-10-04): it launches with that call already made the way FTL players make it: both guns on, the medbay
+    // off (it only matters once someone is hurt; the rest at the beacon still heals by its level). The power tip teaches the swap.
     // doors and sensors as FTL's Kestrel has them (level 1; like the pilot they take no reactor power)
-    systems:{ shields:{level:2,power:2}, engines:{level:2,power:2}, weapons:{level:3,power:3}, medbay:{level:1,power:1}, pilot:{level:1,power:1}, oxygen:{level:1,power:1}, doors:{level:1,power:1}, sensors:{level:1,power:1} },
+    systems:{ shields:{level:2,power:2}, engines:{level:2,power:2}, weapons:{level:3,power:3}, medbay:{level:1,power:0}, pilot:{level:1,power:1}, oxygen:{level:1,power:1}, doors:{level:1,power:1}, sensors:{level:1,power:1} },
     weapons:["burst2","artemis"], drones:[],
     // the crew mix: a Terran pilot and engineer, and Tesh, a young Skitterer queen who works consoles by mind control
     // (mindLink: ordinary Skitterers cannot man a human console, see canMan)
@@ -822,17 +828,17 @@ const DEFAULT_MOD = {
     small: {kit:{hull:"hull_raider", painted:true, faces:"left"}, // no fit box: the whole painting, flames and all, fits the window
       layout:[ {id:"pilot",x:0,y:1,w:3,h:4}, {id:"weapons",x:3,y:0,w:4,h:3}, {id:"shields",x:3,y:3,w:4,h:3}, {id:"engines",x:7,y:0,w:4,h:3}, {id:"oxygen",x:7,y:3,w:4,h:3} ]}
   },
-  boss: {name:"FLAGSHIP", size:"large", tier:4, hull:40, crew:7, combat:true, missiles:12,
-    systems:{shields:{level:8},weapons:{level:7},engines:{level:4},pilot:{level:1},cloak:{level:1},drones:{level:2},tele:{level:1}},
-    weapons:["heavy2","burst2","ion","basic"], drones:["defense"], phase2:["hermes","glaive"]},
+  boss: {name:"FLAGSHIP", size:"large", tier:4, hull:30, crew:7, combat:true, missiles:12,
+    systems:{shields:{level:6},weapons:{level:6},engines:{level:4},pilot:{level:1},cloak:{level:1},drones:{level:2},tele:{level:1}},
+    weapons:["heavy","burst2","ion"], drones:["defense"], phase2:["hermes","glaive"]},
   // The final enemy depends on what has been chasing you. Fleets and novas end on the boss above.
   bosses: {
-    swarm: {name:"BROODMOTHER", size:"large", tier:4, hull:48, crew:10, species:"myrm", combat:true, missiles:6,
-      systems:{shields:{level:4},weapons:{level:6},engines:{level:3},pilot:{level:1},drones:{level:5},tele:{level:1}},
-      weapons:["flak","basic","basic"], drones:["combat","combat","defense"], phase2:["chain"]},
-    void:  {name:"THE HOLLOW", size:"large", tier:4, hull:36, crew:5, species:"lumen", missiles:8,
-      systems:{shields:{level:6},weapons:{level:10},engines:{level:5},pilot:{level:1},cloak:{level:3}},
-      weapons:["heavyion","heavy2","pike","burst2","basic"], drones:[], phase2:["glaive","ion"]}
+    swarm: {name:"BROODMOTHER", size:"large", tier:4, hull:42, crew:10, species:"myrm", combat:true, missiles:6,
+      systems:{shields:{level:4},weapons:{level:6},engines:{level:3},pilot:{level:1},drones:{level:3},tele:{level:1}},
+      weapons:["flak","basic","basic"], drones:["defense"], phase2:["chain"]},
+    void:  {name:"THE HOLLOW", size:"large", tier:4, hull:26, crew:5, species:"lumen", missiles:8,
+      systems:{shields:{level:6},weapons:{level:6},engines:{level:4},pilot:{level:1},cloak:{level:1}},
+      weapons:["heavyion","heavy","burst2"], drones:[], phase2:["glaive","ion"]}
   },
   // A wreck pays scrap and supplies, like FTL; system levels and reactor bars are bought with scrap. A salvaged
   // reactor coil or system part still turns up now and then (rare = the chance it is offered at all).
@@ -862,7 +868,9 @@ function sizeRule(x){ const t = MOD.sizes || DEFAULT_MOD.sizes; return t[sizeOf(
 function sizeRank(x){ return SIZE_ORDER.indexOf(sizeOf(x)); }
 function canFit(ship, id){ return !(id === "tele" && sizeOf(ship) === "small"); }
 // a warp lock on one ship stops the other ship's jump drive while it has power
-function warpLocked(ship){ const o = S && (ship === S.you ? S.foe : S.you); return !!(o && o.sys && o.sys.lock && eff(o, "lock") > 0); }
+// The lock overheats (rules.lockHold seconds held, then rules.lockCool seconds down), and the held drive keeps
+// spooling, so a lock can delay a jump but never trap a ship whose guns can't get through (COMBAT-RULES LO1).
+function warpLocked(ship){ const o = S && (ship === S.you ? S.foe : S.you); return !!(o && o.sys && o.sys.lock && eff(o, "lock") > 0 && !(o.lockCool > 0)); }
 const SYS_LABEL = {shields:"SHIELDS",engines:"ENGINES",weapons:"WEAPONS",medbay:"MEDBAY",oxygen:"OXYGEN",pilot:"PILOT",doors:"DOORS",sensors:"SENSORS",cloak:"CLOAK",drones:"DRONES",tele:"TELEPORT",lock:"WARP LOCK"};
 const SYS_SHORT = {shields:"SHLD",engines:"ENG",medbay:"MED",oxygen:"O2",pilot:"HELM",doors:"DOOR",sensors:"SENS",weapons:"GUNS",cloak:"CLOAK",drones:"DRONE",tele:"TELE",lock:"LOCK"};
 const POWERED = ["shields","engines","medbay","oxygen","cloak","drones","tele","lock"]; // weapons are powered per weapon; pilot is always on
@@ -1058,13 +1066,17 @@ function buildEnemy(tpl, sector, seed, opts = {}){
     if (SZ.shields) e.systems.shields.level = Math.min(8, e.systems.shields.level + SZ.shields);
     // shields carry the run's difficulty, as in FTL (1 / 2 / 3 / 4 layers across the run): every ship has at least
     // the sector's layers; sector 1 stays light (one layer at most, the unshielded stay unshielded) so first fights are quick
+    // Retuned 2026-10-04 (Playable v1 economy pass): the floor is 1 / 2 / 2 layers in sectors 2-4 (was 2 / 3 / 4), FTL's
+    // own curve squeezed into four sectors; large ships (+1 layer) and the tier-3 templates bring sector 4 to 3-4 layers
     if (sector <= 1) e.systems.shields.level = Math.min(2, e.systems.shields.level);
-    else e.systems.shields.level = Math.min(8, Math.max(e.systems.shields.level, 2*Math.min(4, sector)));
+    else e.systems.shields.level = Math.min(8, Math.max(e.systems.shields.level, 2*Math.min(2, sector - 1)));
     for (let i = 0; i < (SZ.guns || 0); i++){ e.weapons.push("basic"); e.systems.weapons.level += 1; }
-    if (sector >= 2 && r() < (SZ.lock || 0)){ e.systems.lock = {level:1}; notes.push("Carries a warp lock: you cannot jump away until you knock it out."); }
+    if (sector >= 2 && !opts.threat && r() < (SZ.lock || 0)){ e.systems.lock = {level:1}; notes.push("Carries a warp lock: you cannot jump away until you knock it out."); }
   }
   if (opts.counter !== false && R && R.you && sector >= 2) applyCounters(e, R.you, r, sector, notes); // no counter-refits in sector 1
-  if (!opts.boss && sector >= 2 && sector - (e.tier ?? 0) >= 1){ const g = sector >= 4 ? "burst1" : "basic"; e.weapons.push(g); e.systems.weapons.level += MOD.weapons[g].power; notes.push("Veteran refit: an extra gun."); }
+  // the veteran refit (an extra gun on a ship at or below the sector's tier); sector 2 spares its own tier-1 ships
+  // (Playable v1: sector 2 is where a starter-ish ship meets two-layer guns for the first time)
+  if (!opts.boss && sector >= 2 && sector - (e.tier ?? 0) >= (sector === 2 ? 2 : 1)){ const g = "basic"; e.weapons.push(g); e.systems.weapons.level += MOD.weapons[g].power; notes.push("Veteran refit: an extra gun."); }
   if (!e.systems.shields.level) delete e.systems.shields;
   const scale = opts.boss ? 1 : 1 + MOD.rules.enemyScalePerSector*(sector-1);
   const hull = Math.round(e.hull*scale*(opts.boss ? 1 : SZ.hull || 1));
@@ -1334,7 +1346,7 @@ function envTick(dt){
 /* ---------------- fight flow ---------------- */
 function prepShip(ship){
   // a teleporter is ready when a fight opens (FTL T3); the enemy waits until its crew have manned up (enemyQuietTime)
-  ship.shT = 0; ship.flash = 0; ship.hz = {}; ship.cloakT = 0; ship.cloakCd = 0; ship.teleCharge = 1; ship.ftl = 0; ship.fleeing = false; ship.phase2done = false;
+  ship.lockHeat = 0; ship.lockCool = 0; ship.shT = 0; ship.flash = 0; ship.hz = {}; ship.cloakT = 0; ship.cloakCd = 0; ship.teleCharge = 1; ship.ftl = 0; ship.fleeing = false; ship.phase2done = false;
   ship.o2 = {}; ship.vent = {}; for (const r of ship.layout || []) ship.o2[r.id] = 100;
   if (typeof doorsReset === "function") doorsReset(ship); // FTL D6: every door sealed and whole again
   ship.weapons.forEach(w => { w.charge = 0; w.target = null; w.stack = 0; }); // every gun starts cold (FTL C9)
@@ -1356,7 +1368,7 @@ function startFight(foe, opts = {}){
   $("sector").textContent = `SECTOR ${R.sector} · vs ${foe.name}`;
   buildDeck();
   const notes = foe.notes.length ? " " + foe.notes.join(" ") : "";
-  if (foe.env) setHint((opts.intro ? opts.intro + " " : "") + "Nothing to shoot. Keep the shields up, fight the fires, and jump the moment the drive spools.");
+  if (foe.env) setHint((opts.intro ? opts.intro + " " : "") + "Nothing to shoot. Keep the shields up and fight the fires: the ship jumps out on its own when the drive spools.");
   else setHint((opts.intro ? opts.intro + " " : "") + (R.fights === 0 ? "Paused. Pick a weapon, tap an enemy room, then Resume." : `${foe.name} on scope.${notes}`));
   if (STAGE.ok) STAGE.cine(opts.boss ? 3.4 : 2.2, opts.boss && !foe.env ? "boss" : "arrive", opts.boss && !foe.env ? "foe" : null);
   if (opts.boss) showBanner(foe.name, foe.env ? "survive it" : "the flagship");
@@ -1410,8 +1422,13 @@ function update(dt){
     else if (me.cloakCd > 0 && eff(me,"cloak") > 0) me.cloakCd = Math.max(0, me.cloakCd - dt);
     if (me.sys.tele){ const lv = eff(me,"tele"); if (lv > 0) me.teleCharge = Math.min(1, me.teleCharge + dt/((Array.isArray(R_.teleportTimes) ? byLevel(R_.teleportTimes, lv) : R_.teleportTime*(1 - 0.2*(lv-1)))*(me.you ? 1 : 1.4))); }
     const locked = !them.env && warpLocked(me);
-    if (me.you && locked && !S.saidLock){ S.saidLock = true; setHint(`Warp locked. The ${them.name}'s WARP LOCK holds your drive: shoot that room out to jump.`); }
-    if ((me.you || me.fleeing) && !locked && manned(me,"pilot") && cap(me,"pilot") > 0 && eff(me,"engines") > 0)
+    if (me.you && locked && !S.saidLock){ S.saidLock = true; setHint(`Warp locked. The ${them.name}'s WARP LOCK holds your jump: shoot that room out, or wait for it to overheat (every ${R_.lockHold || 40} s).`); }
+    // the lock heats while it holds a drive and drops for a while when it overheats (LO1)
+    if (them.sys && them.sys.lock){ if (them.lockCool > 0){ them.lockCool = Math.max(0, them.lockCool - dt); if (!them.lockCool && me.you) S.saidLock = false; }
+      else if (locked){ them.lockHeat = (them.lockHeat || 0) + dt; if (them.lockHeat >= (R_.lockHold || 40)){ them.lockHeat = 0; them.lockCool = R_.lockCool || 15; float(them, "lock", "LOCK OVERHEATED", "#ffc857"); if (me.you) setHint(`The ${them.name}'s warp lock overheats: jump now if the drive is ready.`); } } }
+    // in a hazard the spool is the clock you survive (the drive is already warm from the jump in): it runs even with
+    // the engines or the helm knocked out, so a hazard is a known stretch of damage, never a trap
+    if ((me.you || me.fleeing) && ((me.you && them.env && !them.finale) || (manned(me,"pilot") && cap(me,"pilot") > 0 && eff(me,"engines") > 0)))
       me.ftl = Math.min(1, me.ftl + dt*jumpRate(me, them)*(sizeRule(me).ftl || 1)*(me.you && them.env ? them.ftlMult : 1));
     updateDrones(me, them, dt);
     updateHazards(me, dt);
@@ -1420,6 +1437,7 @@ function update(dt){
   }
   stepFx(dt);
   if (S.foe.env) envTick(dt);
+  if (S.foe.env && !S.over && S.you.ftl >= 1 && S.you.hull > 0 && typeof actJump === "function"){ actJump(); return; } // the drive catches: out of the hazard
   S.aiT -= dt; if (S.aiT <= 0 && !S.foe.env){ S.aiT = 0.4; enemyAI(0.4); }
   const crew = allCrew();
   navDoorsTick(S.you, dt); navDoorsTick(S.foe, dt); // doors open ahead of crew and shut behind them
@@ -1448,7 +1466,7 @@ function update(dt){
   if (!S.over){
     if (!S.you.crew.some(c => c.hp > 0)) endFight("dead", "crew");
     else if (!S.foe.env && !S.foe.crew.some(c => c.hp > 0)) endFight("captured");
-    else if (S.foe.fleeing && S.foe.ftl >= 1) endFight("fled");
+    else if (S.foe.fleeing && S.foe.ftl >= 1 && !warpLocked(S.foe)) endFight("fled");
     // FTL A6: a fight where nobody lands a blow for a minute ends; the enemy jumps away and leaves some fuel behind
     else if (!S.foe.env && !S.foe.boss && !S.offer && S.t - (S.lastHullT || 0) >= (R_.stalemateTime || Infinity)) endFight("stalemate");
   }
@@ -1684,7 +1702,8 @@ function enemyAI(dt = 0.4){
 /* ---------------- shots ---------------- */
 // what a surrendering ship hands over (FTL A3): scrap, fuel and missiles, a little less than its wreck would give
 function surrenderTerms(f){
-  const tier = f.tier || 0, sc = Math.round((10 + tier*7)*0.75*(sizeRule(f).scrap || 1)) + (R ? R.sector*2 : 2);
+  const tier = f.tier || 0, Q = MOD.rules, L = {base: Q.lootBase ?? 10, perTier: Q.lootPerTier ?? 7, perSector: Q.lootPerSector ?? 2, sectorMult: Q.lootSectorMult ?? 0}, sec = R ? R.sector : 1;
+  const sc = Math.round((L.base + tier*L.perTier)*0.75*(sizeRule(f).scrap || 1)*(1 + (L.sectorMult || 0)*(sec - 1))) + sec*L.perSector;
   return {scrap: sc, fuel: 1 + (tier >= 2 ? 1 : 0), missiles: f.missiles > 0 ? Math.min(3, f.missiles) : 0};
 }
 function offerSurrender(f){
@@ -3200,7 +3219,7 @@ function tickDeck(){
     bd.classList.toggle("armed", S.boardArm);
     $("bBoard").style.width = `${100*you.teleCharge}%`;
   }
-  const j = $("aJump"); j.disabled = you.ftl < 1; j.firstChild.textContent = you.ftl >= 1 ? "JUMP AWAY" : warpLocked(you) ? "WARP LOCKED" : `FTL ${Math.round(you.ftl*100)}%`; $("bJump").style.width = `${100*you.ftl}%`;
+  const j = $("aJump"); j.disabled = you.ftl < 1 || (!S.foe.env && warpLocked(you)); j.firstChild.textContent = !S.foe.env && warpLocked(you) ? "WARP LOCKED" : you.ftl >= 1 ? "JUMP AWAY" : `FTL ${Math.round(you.ftl*100)}%`; $("bJump").style.width = `${100*you.ftl}%`;
   const go = $("go"); setText(go, S.paused ? "▶ RESUME" : "❚❚ PAUSE"); go.className = `go${S.paused ? "" : " running"}`;
 }
 // Write a button's text only when it changes. Rewriting it every frame swaps the text node under the mouse, and
@@ -3280,7 +3299,7 @@ function doBoard(rid){
 }
 // jumping away from an enemy ship is a jump: it burns a fuel cell (FTL J6). With none left the drive burns hull
 // plating instead, as a drift on the map does. Leaving a hazard is free: its drive spool is how you get through it.
-function actJump(){ if (!S || S.over || S.you.ftl < 1) return;
+function actJump(){ if (!S || S.over || S.you.ftl < 1 || (!S.foe.env && warpLocked(S.you))) return;
   if (!S.foe.env){ if (R.fuel > 0) R.fuel--; else { R.you.hull = Math.max(1, R.you.hull - 3); R.log.push("Jumped clear with no fuel, burning hull plating for thrust."); } }
   endFight("escaped"); }
 // a beaten ship offers to surrender (FTL A3): the fight pauses until you answer
@@ -5372,7 +5391,7 @@ function crewRoomNow(ship, c){ const nav = shipNav(ship); return c._navKey === n
    THE VOYAGE — sector maps, beacons, events, stores, the arc,
    and a universe that remembers every captain it has lost
    ============================================================ */
-const SECTORS = 4;
+const SECTORS = 4, MAP_COLS = 9;
 let UNI = {runs:0, wins:0, captains:[]};
 let db = null, sample = null;
 
@@ -5408,7 +5427,8 @@ function fillNames(s){
 
 /* ---------------- sector map ---------------- */
 function genMap(sector){
-  const r = rng32(hashStr(R.seed + ":" + sector)), cols = 7, nodes = [];
+  // 9 columns (7 between start and exit): about two more beacons on the way across each sector (run length, Playable v1)
+  const r = rng32(hashStr(R.seed + ":" + sector)), cols = MAP_COLS, nodes = [];
   const link = (a,b) => { if (!a.links.includes(b.id)) a.links.push(b.id); if (!b.links.includes(a.id)) b.links.push(a.id); };
   for (let c = 0; c < cols; c++){
     const n = (c === 0 || c === cols-1) ? 1 : 2 + (r() < 0.55 ? 1 : 0);
@@ -5432,12 +5452,17 @@ function genMap(sector){
   nodes[nodes.length-1].type = sector === SECTORS ? "flagship" : "exit";
   const mid = nodes.filter(n => n.col > 0 && n.col < cols-1);
   for (const n of mid){ const x = r(); n.type = x < 0.46 ? "hostile" : x < 0.88 ? "event" : "store"; }
-  if (!mid.some(n => n.type === "store" && n.col >= 2 && n.col <= 4)){ const c = mid.filter(n => n.col >= 2 && n.col <= 4 && n.type !== "hostile"); (c.length ? rpick(r, c) : rpick(r, mid)).type = "store"; }
+  // every sector has a trader (fuel, always) in its middle third, and another past it on longer maps
+  const lo = 2, hi = cols - 4;
+  if (!mid.some(n => n.type === "store" && n.col >= lo && n.col <= hi)){ const c = mid.filter(n => n.col >= lo && n.col <= hi && n.type !== "hostile"); (c.length ? rpick(r, c) : rpick(r, mid)).type = "store"; }
   for (const n of mid) if (n.type === "event" && r() < 0.2){ n.type = "hazard"; n.hz = rpick(r, ["asteroids","asteroids","flare","ion"]); }
   const wrecks = (UNI.captains || []).filter(c => c.fate === "lost" && c.sector === sector && c.run !== R.id);
   if (wrecks.length){ const ev = mid.filter(n => n.type === "event"); if (ev.length){ const n = rpick(r, ev); n.type = "wreck"; n.wreck = wrecks[wrecks.length - 1 - Math.floor(r()*Math.min(3, wrecks.length))]; } }
   for (const n of mid.filter(n => n.type === "hostile")){
-    const tier = clamp(sector - 1 + (n.col >= 4 ? 1 : 0) + (r() < 0.25 ? 1 : 0) - (r() < 0.25 ? 1 : 0), 0, 3);
+    // tier by sector, a step up in the far half; sector 3 caps its tier-3 ships at about a quarter (the big ones belong to sector 4)
+    let tier = clamp(sector - 1 + (n.col >= Math.ceil(cols/2) ? 1 : 0) + (r() < 0.25 ? 1 : 0) - (r() < 0.25 ? 1 : 0), 0, 3);
+    if (sector === 3){ const x = r(); tier = x < 0.25 ? 3 : x < 0.88 ? 2 : 1; }
+    else if (sector <= 2) tier = Math.min(tier, sector); // sector 1 tops out at tier 1, sector 2 at tier 2
     const pool = MOD.enemies.filter(e => (e.tier ?? 0) === tier);
     n.tpl = (pool.length ? rpick(r, pool) : rpick(r, MOD.enemies)).name;
   }
@@ -5472,9 +5497,10 @@ function buildMapDeck(){
   const n = R.sel != null ? R.map.nodes[R.sel] : null;
   const reach = n && reachable().includes(n.id);
   let card = "";
-  if (!n) card = `<b>SECTOR ${R.sector} OF ${SECTORS}${R.arc ? " · " + esc(R.arc.sectors[R.sector-1].name.toUpperCase()) : ""}</b><span>Tap a beacon to scan it. Every jump costs 1 fuel and lets ${esc(threatName())} close in. Reach the green EXIT beacon.${hunted ? " Your hull reads weak on their scopes: hunters will come looking." : ""}</span>`;
+  if (R.fuel <= 0 && (!n || n.id !== R.pos)) card = `<b><span class="tag" style="color:#ff9b5c">NO FUEL</span>THE TANKS ARE DRY</b><span>You can't jump. Tap OUT OF FUEL to wait for a trader or call for help, or PROBE the world below for fuel.</span>`;
+  else if (!n) card = `<b>SECTOR ${R.sector} OF ${SECTORS}${R.arc ? " · " + esc(R.arc.sectors[R.sector-1].name.toUpperCase()) : ""}</b><span>Tap a beacon to scan it. Every jump costs 1 fuel and lets ${esc(threatName())} close in. Reach the green EXIT beacon.${hunted ? " Your hull reads weak on their scopes: hunters will come looking." : ""}</span>`;
   else if (n.id === R.pos) card = `<b>YOU ARE HERE · ${esc(planetOf(n.seed).toUpperCase())}</b><span>${n.probed ? "You've already probed this world." : "Send a probe down and see what the world gives you. Free, and once per beacon."}</span>`;
-  else if (n.col <= R.threat && n.type !== "flagship") card = `<b><span class="tag" style="color:#ff3d5a">OVERRUN</span>${esc(String(pursuer().name || threatName()).toUpperCase())}</b><span>${({fleet:"Its vanguard holds this beacon. A hard fight and nothing worth salvaging.", swarm:"The swarm has nested here. Expect a fight against something that doesn't need a crew.", nova:"The shockfront has burned through here. No enemy, just fire. You'd have to outlast it.", void:"The dark has taken this beacon. No enemy, just cold. You'd have to outlast it."})[pursuer().kind] || ""}</span>`;
+  else if (n.col <= R.threat && n.type !== "flagship" && n.type !== "exit") card = `<b><span class="tag" style="color:#ff3d5a">OVERRUN</span>${esc(String(pursuer().name || threatName()).toUpperCase())}</b><span>${({fleet:"Its vanguard holds this beacon. A hard fight and nothing worth salvaging.", swarm:"The swarm has nested here. Expect a fight against something that doesn't need a crew.", nova:"The shockfront has burned through here. No enemy, just fire. You'd have to outlast it.", void:"The dark has taken this beacon. No enemy, just cold. You'd have to outlast it."})[pursuer().kind] || ""}</span>`;
   else if (n.type === "hazard") card = `<b><span class="tag" style="color:#ffc857">HAZARD</span>${esc(({asteroids:"ASTEROID FIELD", flare:"SOLAR STORM", ion:"ION STORM"})[n.hz] || "HAZARD")}</b><span>Dangerous, and rich if you're willing to sit in it. You can pass it by. Near a ${esc(planetOf(n.seed))}.</span>`;
   else if (n.visited) card = `<b>VISITED</b><span>Empty space now. Jumping here still costs fuel and time.</span>`;
   else if (n.col <= R.threat + 1 && n.type !== "flagship" && n.type !== "exit" && reachable().includes(n.id)) card = `<b><span class="tag" style="color:#ff9b5c">PURSUIT</span>${esc(String(pursuer().name || threatName()).toUpperCase())} WILL BE HERE FIRST</b><span>Jump here and you meet the pursuit, not what the scanners show. Every jump lets it close in.</span>`;
@@ -5491,16 +5517,16 @@ function buildMapDeck(){
   const here = R.map.nodes[R.pos], pb = $("probeBtn");
   pb.disabled = !!R.jumping || !here || !!here.probed; pb.textContent = here && here.probed ? "PROBED" : "PROBE";
   const jb = $("jumpBtn");
-  jb.disabled = !reach || !!R.jumping;
-  jb.textContent = !reach ? "JUMP" : (R.fuel <= 0 ? "DRIFT (NO FUEL)" : "JUMP");
+  jb.disabled = R.fuel <= 0 ? !!R.jumping : (!reach || !!R.jumping);
+  jb.textContent = R.fuel <= 0 ? "OUT OF FUEL" : "JUMP";
 }
 function doJump(){
-  if (!R || S.mode !== "map" || R.sel == null || R.jumping) return;
+  if (!R || S.mode !== "map" || R.jumping) return;
+  if (R.fuel <= 0) return strandedSheet(); // no fuel, no jump (FTL): wait it out or call for help, never a lethal drift
+  if (R.sel == null) return;
   const n = R.map.nodes[R.sel]; if (!reachable().includes(n.id)) return;
   R.jumping = true;
-  let drift = false;
-  if (R.fuel <= 0){ drift = true; R.you.hull -= 3; R.threat += 1; R.log.push("Drifted a jump on emergency thrust, burning hull plating."); }
-  else R.fuel--;
+  R.fuel--;
   R.threat += 1; R.jumps++;
   for (const d of R.debts) d.due--;
   R.pos = n.id; R.sel = null;
@@ -5509,9 +5535,39 @@ function doJump(){
   if (STAGE.ok) STAGE.focus(n.id);
   S.warp = 1; AUDIO.sfx("jump");
   buildMapDeck();
-  if (R.you.hull <= 0){ setTimeout(() => gameOver(false, "the jump that tore the hull apart"), 800); return; }
-  setHint(drift ? "No fuel. You burn hull plating for thrust." : "");
+  setHint("");
   setTimeout(() => arrive(n), 800);
+}
+// Out of fuel (FTL): you can't jump, but you are never stuck. WAIT lets an hour pass (the pursuit closes in by one)
+// for a passing trader or a drifting fuel cell, and the odds grow every time nothing comes. A DISTRESS call
+// brings someone: help, or trouble that pays in fuel if you win. If the pursuit reaches you, its vanguard is a fight,
+// and a ship on empty tanks siphons a cell from any wreck it beats.
+function strandedSheet(){
+  const nm = capFirst(threatName());
+  sheet(`<h2>OUT OF FUEL</h2><div class="prose">The tanks are dry and the drive won't spool. ${esc(nm)} gets closer every hour you sit here. The PROBE can still look for fuel on the world below.</div>
+    <button class="choice" id="wtWait"><b>Wait for a passing ship</b><span>An hour goes by: a trader or a drifting fuel cell may turn up (better odds each time). ${esc(nm)} closes in by one.</span></button>
+    <button class="choice" id="wtCall"><b>Send a distress call</b><span>Someone will answer. Maybe help, maybe pirates (beat them and take their fuel). ${esc(nm)} closes in by one.</span></button>
+    <div class="btnRow"><button class="btn" id="back">NOT YET</button></div>`);
+  $("back").addEventListener("click", () => { AUDIO.sfx("click"); closeSheet(); });
+  const pass = () => { R.threat += 1; for (const d of R.debts) d.due--; R.strandWaits = (R.strandWaits || 0) + 1; };
+  const after = () => { const here = R.map.nodes[R.pos]; if (here && here.col <= R.threat && R.fuel <= 0){ R.pendingArrive = null; return overrun(); } returnToMap(); };
+  $("wtWait").addEventListener("click", () => { AUDIO.sfx("click");
+    const odds = Math.min(1, 0.5 + 0.2*(R.strandWaits || 0)); pass();
+    if (Math.random() >= odds){ saveRun(); return outcomeSheet("NOTHING COMES", `An hour of empty scopes. ${nm} is closer now.`, [], [], after); }
+    R.strandWaits = 0;
+    if (Math.random() < 0.5 && R.scrap >= 6){ const n = Math.min(3, Math.floor(R.scrap/6)); R.scrap -= 6*n; R.fuel += n; saveRun();
+      return outcomeSheet("A TRADER", `A tramp freighter drops out of warp, sees your running lights and sells you what it can spare at a fair price.`, [`+${n} fuel`, `-${6*n} scrap`], [true, false], after); }
+    const f = 2; R.fuel += f; saveRun();
+    outcomeSheet("A DRIFTING CELL", "A fuel pod, lost from some convoy, tumbles into sensor range. {crew} goes out on a tether and brings it home.".replace("{crew}", liveCrew()[0] ? liveCrew()[0].name : "Someone"), [`+${f} fuel`], [true], after);
+  });
+  $("wtCall").addEventListener("click", () => { AUDIO.sfx("click"); pass(); R.strandWaits = 0;
+    const x = Math.random();
+    if (x < 0.55){ const f = 2 + (Math.random() < 0.5 ? 1 : 0), h = Math.random() < 0.5 ? 5 : 0; R.fuel += f; if (h) R.you.hull = Math.min(R.you.maxHull, R.you.hull + h); saveRun();
+      return outcomeSheet("SOMEONE ANSWERS", "A patrol cutter answers the call. They top up your tanks, patch what they can, and tell you to stop drifting in a war zone.", [`+${f} fuel`].concat(h ? [`+${h} hull`] : []), [true, true], after); }
+    const tier = clamp(R.sector - 1, 0, 3), pool = MOD.enemies.filter(e => (e.tier ?? 0) === tier && e.flees);
+    saveRun();
+    fightAt(pick(pool.length ? pool : MOD.enemies), {intro: "Pirates answered your call. Their tanks are full."});
+  });
 }
 // The beacon you just reached is saved with its event and its dice, so a reload + CONTINUE brings back the
 // same event (and the same answer if you'd already chosen) instead of a reroll.
@@ -5520,11 +5576,18 @@ function pinEvent(make){ const p = R.pendingArrive; if (p && p.ev) return runEve
 function arrive(n){
   R.jumping = false;
   if (STAGE.ok){ STAGE.setBeacon(n.seed, R.sector); STAGE.local = true; }
-  const first = !n.visited; n.visited = true;
+  const first = !n.visited;
+  // a loot sheet saved before a reload comes back as it was (no reroll)
+  if (R.pendingArrive && R.pendingArrive.id === n.id && R.pendingArrive.loot) return showLoot(null, false, R.pendingArrive.loot);
+  // the exit and the flagship come first and are never marked visited: the exit always leads on (even with the
+  // pursuit on it), and a flagship you jumped away from is still there when you come back
+  if (n.type === "exit") return nextSector();
+  if (n.type === "flagship") return fightBoss();
+  n.visited = true;
   if (R.pendingArrive && R.pendingArrive.id === n.id && R.pendingArrive.ev) return runEvent(R.pendingArrive.ev);
   const due = R.debts.find(d => d.due <= 0);
   if (due){ R.debts = R.debts.filter(d => d !== due); return pinEvent(() => reckoningFor(due)); }
-  if (n.col <= R.threat && n.type !== "flagship") return overrun();
+  if (n.col <= R.threat) return overrun();
   if (!first){ R.pendingArrive = null; setHint("Empty space. The Threat draws closer."); saveRun(); return buildMapDeck(); }
   const hunted = R.you.hull < R.you.maxHull*0.4;
   if (n.type === "hostile"){
@@ -5546,8 +5609,6 @@ function arrive(n){
   if (n.type === "store") return openStore(n);
   if (n.type === "wreck") return pinEvent(() => wreckEvent(n.wreck));
   if (n.type === "hazard") return hazardSheet(n);
-  if (n.type === "exit") return nextSector();
-  if (n.type === "flagship") return fightBoss();
   returnToMap();
 }
 // A smaller ship can run dark past a bigger one. Engines, sensors and a cloak help; if they spot you,
@@ -5570,7 +5631,9 @@ function slipSheet(n, s){
   $("slFight").addEventListener("click", () => { AUDIO.sfx("click"); fightAt(tplByName(n.tpl), {seed:n.seed}); });
 }
 // the same beacon always holds the same vanguard, so a reload mid-fight brings back the ship you were fighting
-function vanguardTpl(seed){ const tier = clamp(R.sector, 1, 3), pool0 = MOD.enemies.filter(e => e.tier === tier), pool = pool0.length ? pool0 : MOD.enemies;
+// the vanguard is a warning, not an execution: the sector's own tier (never the top one), no warp lock (buildEnemy),
+// no boarders (a crew killed at the helm can't spool), so a ship that spools its drive at once gets away scorched
+function vanguardTpl(seed){ const tier = clamp(R.sector - 1, 0, 2), pool0 = MOD.enemies.filter(e => e.tier === tier && !(e.systems && e.systems.tele)), pool = pool0.length ? pool0 : MOD.enemies;
   return {...clone(seed == null ? pick(pool) : pool[Math.abs(seed) % pool.length]), name: "VANGUARD"}; }
 function fightAt(tpl, opts = {}){
   const foe = buildEnemy(tpl, R.sector, opts.seed ?? Math.floor(Math.random()*1e9), {threat: opts.threat, name: opts.name});
@@ -5609,11 +5672,20 @@ const HAZARDS = {
 function hazardSheet(n){
   const h = HAZARDS[n.hz] || HAZARDS.asteroids, reward = {scrap: 16 + 8*R.sector, fuel: n.hz === "flare" ? 2 : 0, missiles: n.hz === "asteroids" ? 1 : 0};
   const pay = [`+${reward.scrap} scrap`].concat(reward.fuel ? [`+${reward.fuel} fuel`] : []).concat(reward.missiles ? [`+${reward.missiles} missile`] : []);
+  const r = hazardRisk(n.hz);
   sheet(`<h2>${esc(fillNames(h.title))}</h2><div class="prose">${esc(fillNames(h.text))}</div>
-    <button class="choice" id="hzGo"><b>${esc(h.verb)}</b><span>Survive until the drive spools, then jump. Pays ${esc(pay.join(", "))}.</span></button>
+    <button class="choice" id="hzGo"><b>${esc(h.verb)} · about ${r.secs} s</b><span>Sit in it while the drive spools (${r.secs} s; the ship jumps out on its own). Expect ${r.lo}-${r.hi} hull damage${r.what}. Pays ${esc(pay.join(", "))}.</span></button>
     <button class="choice" id="hzNo"><b>Leave it alone</b><span>Nothing ventured.</span></button>`);
   $("hzGo").addEventListener("click", () => { AUDIO.sfx("click"); fightEnv(n.hz, {reward, intro:"Hold together."}); });
   $("hzNo").addEventListener("click", () => { AUDIO.sfx("click"); returnToMap(); });
+}
+// What a hazard costs, measured (scratch hazard sim, 2026-10-04: 100 runs a kind and sector, a full-hull Kestrel at
+// engines 2): the spool is the clock, so the damage is a known range. Worst seen: asteroids 3 / 6 / 6 / 9 hull by
+// sector, solar storm 4-5, ion storm 4-5 (and systems locked for a while). Scaled to your drive's spool time.
+function hazardRisk(kind){
+  const secs = Math.round((MOD.rules.hazardJumpTime || 23)/(sizeRule(R.you).ftl || 1)), k = secs/17, s = R.sector;
+  const hi = Math.max(2, Math.round(k*({asteroids: 3 + 2*(s - 1), flare: 5, ion: 5})[kind] || 5));
+  return {secs, lo: 1, hi, what: ({asteroids: ", a breach or two", flare: " and fires to put out", ion: " and systems knocked offline"})[kind] || ""};
 }
 const BOSS_LOOK = {
   fleet:{palette:{hull:"#2a2e3a",accent:"#ff3d5a",glow:"#ff5470"}, nose:"blunt", engines:4, wings:"swept", modules:["turret","turret","sensor","turret"], wear:0.55},
@@ -5671,6 +5743,10 @@ function afterFight(result){
   if (result === "win" || result === "captured"){
     R.kills++; R.rep += (foe.tier || 0) + 1;
     if (foe.boss) return gameOver(true);
+    // the pursuit's vanguard pays nothing (the map card says so): an overrun beacon is never a scrap farm.
+    // Only a ship flying on empty tanks siphons one fuel cell from the wreck, so running dry is never a dead end.
+    if (foe.threat){ const f = R.fuel <= 0 ? 1 : 0; R.fuel += f; R.pendingArrive = null; saveRun();
+      return outcomeSheet(`${foe.name} BROKEN`, "It dies hard and leaves nothing worth the hold space: a vanguard flies stripped for speed. The rest of the pursuit is not far behind it.", f ? ["+1 fuel siphoned from its tanks"] : [], f ? [true] : [], () => returnToMap()); }
     if (S.ft && result === "win") return ftLoot(foe);
     return showLoot(foe, result === "captured");
   }
@@ -5683,35 +5759,53 @@ function afterFight(result){
   if (result === "fled") return outcomeSheet(`THE ${foe.name} ESCAPED`, "Its drive flares and it is gone. Nothing to salvage but its wake.", [], [], () => after ? after() : returnToMap());
   if (result === "escaped") return outcomeSheet("JUMPED CLEAR", `You spool up and leave the ${foe.name} firing at empty space.`, [], [], () => returnToMap());
 }
-function showLoot(foe, captured){
-  const you = R.you, tier = foe.tier || 0;
-  const scrap = Math.round((10 + tier*7)*(0.8 + Math.random()*0.4)*(captured ? 1.5 : 1)*(sizeRule(foe).scrap || 1)) + R.sector*2;
-  R.scrap += scrap;
-  const chips = [`+${scrap} scrap`];
-  if (Math.random() < 0.5){ const f = 1 + Math.floor(Math.random()*2); R.fuel += f; chips.push(`+${f} fuel`); }
-  if (Math.random() < 0.4){ const m = 1 + Math.floor(Math.random()*2); you.missiles += m; chips.push(`+${m} missiles`); }
-  const owned = new Set(you.weapons.map(w => w.id));
-  const pool = MOD.rewards.filter(r => (r.kind !== "weapon" || (you.weapons.length < 4 && Object.keys(MOD.weapons).some(id => !owned.has(id)))) && (!r.rare || Math.random() < r.rare));
-  const picks = [...pool].sort(() => Math.random() - .5).slice(0, 3).map(r => {
-    if (r.kind === "weapon"){ const fw = foe.weapons.map(w => w.id).filter(id => !owned.has(id)); const tierOk = Object.keys(MOD.weapons).filter(id => !owned.has(id) && (MOD.weapons[id].tier ?? 1) <= R.sector); const ids = fw.length && Math.random() < 0.6 ? fw : (tierOk.length ? tierOk : Object.keys(MOD.weapons).filter(id => !owned.has(id))); const id = pick(ids); const d = MOD.weapons[id], wi = weaponInfo(d); return {...r, weapon:id, label:`Salvage: ${d.name}`, detail:`${wi.head} · ${wi.tags}`}; }
-    return {...r, detail: r.kind === "system" ? `${SYS_LABEL[r.system] || r.system} ${you.sys[r.system] ? you.sys[r.system].level : 0} → ${(you.sys[r.system] ? you.sys[r.system].level : 0) + r.amount}` : ""};
-  });
-  if (captured){
-    const theirs = ["cloak","drones","tele"].filter(id => foe.sys[id] && !you.sys[id] && canFit(you, id));
-    if (theirs.length){ const id = pick(theirs); picks.unshift({kind:"system", system:id, amount:1, label:`Strip their ${SYS_LABEL[id].toLowerCase()}`, detail:"a whole new system, installed where you have room", blue:true}); }
-    if (you.crew.length < 8) picks.unshift({kind:"crew", label:"Take on a survivor", detail:"one of their crew would rather live on your side", blue:true});
-    if (foe.hull > 0 && !foe.boss && liveCrew().length) picks.unshift(shipOffer(foe));
+function showLoot(foe, captured, pinned){
+  const you = R.you;
+  let L = pinned;
+  if (!L){
+    const tier = foe.tier || 0;
+    const scrap = lootScrap(foe, captured);
+    R.scrap += scrap;
+    const chips = [`+${scrap} scrap`];
+    if (Math.random() < 0.5){ const f = 1 + Math.floor(Math.random()*2); R.fuel += f; chips.push(`+${f} fuel`); }
+    else if (R.fuel <= 0){ R.fuel += 1; chips.push("+1 fuel (siphoned from its tanks)"); } // empty tanks are a squeeze, never a dead end
+    if (Math.random() < 0.55){ const m = 1 + Math.floor(Math.random()*(R.sector >= 2 ? 3 : 2)); you.missiles += m; chips.push(`+${m} missile${m > 1 ? "s" : ""}`); } // FTL wrecks carry ammunition often
+    const owned = new Set(you.weapons.map(w => w.id));
+    const pool = MOD.rewards.filter(r => (r.kind !== "weapon" || (you.weapons.length < 4 && Object.keys(MOD.weapons).some(id => !owned.has(id)))) && (!r.rare || Math.random() < r.rare*(1 + 0.5*(R.sector - 1))));
+    const picks = [...pool].sort(() => Math.random() - .5).slice(0, 3).map(r => {
+      if (r.kind === "weapon"){ const fw = foe.weapons.map(w => w.id).filter(id => !owned.has(id)); const tierOk = Object.keys(MOD.weapons).filter(id => !owned.has(id) && (MOD.weapons[id].tier ?? 1) <= R.sector); const ids = fw.length && Math.random() < 0.6 ? fw : (tierOk.length ? tierOk : Object.keys(MOD.weapons).filter(id => !owned.has(id))); const id = pick(ids); const d = MOD.weapons[id], wi = weaponInfo(d); return {...r, weapon:id, label:`Salvage: ${d.name}`, detail:`${wi.head} · ${wi.tags}`}; }
+      // salvage grows with the sector: a later wreck carries more scrap, plating and ammunition
+      const amt = r.kind === "scrap" ? Math.round(r.amount*(1 + 0.6*(R.sector - 1))) : r.kind === "hull" ? r.amount + 2*(R.sector - 1) : r.amount;
+      return {...r, amount: amt, label: r.kind === "scrap" ? `+${amt} scrap` : r.kind === "hull" ? `Patch ${amt} hull` : r.label, detail: r.kind === "system" ? `${SYS_LABEL[r.system] || r.system} ${you.sys[r.system] ? you.sys[r.system].level : 0} → ${(you.sys[r.system] ? you.sys[r.system].level : 0) + r.amount}` : ""};
+    });
+    if (captured){
+      const theirs = ["cloak","drones","tele"].filter(id => foe.sys[id] && !you.sys[id] && canFit(you, id));
+      if (theirs.length){ const id = pick(theirs); picks.unshift({kind:"system", system:id, amount:1, label:`Strip their ${SYS_LABEL[id].toLowerCase()}`, detail:"a whole new system, installed where you have room", blue:true}); }
+      if (you.crew.length < 8) picks.unshift({kind:"crew", label:"Take on a survivor", detail:"one of their crew would rather live on your side", blue:true});
+      if (foe.hull > 0 && !foe.boss && liveCrew().length) picks.unshift(shipOffer(foe));
+    }
+    L = {name: foe.name, captured: !!captured, chips, picks: picks.slice(0, 4)};
+    // saved with the gains already in: a reload brings back this same sheet, never a reroll (or a refight)
+    if (R.pendingArrive){ R.pendingArrive.loot = L; R._pickApplied = false; }
+    R.loot = L.picks; saveRun();
   }
-  R.loot = picks.slice(0, 4);
-  sheet(`<h2>${esc(foe.name)} ${captured ? "CAPTURED" : "DESTROYED"}</h2>
-    <p>${captured ? "Their crew is dead. The ship is yours to strip." : "The wreck tumbles. Pick one thing from it."}</p>
-    <div class="chips">${chips.map(c => `<span class="chip good">${esc(c)}</span>`).join("")}</div>
+  R.loot = L.picks;
+  sheet(`<h2>${esc(L.name)} ${L.captured ? "CAPTURED" : "DESTROYED"}</h2>
+    <p>${L.captured ? "Their crew is dead. The ship is yours to strip." : "The wreck tumbles. Pick one thing from it."}</p>
+    <div class="chips">${L.chips.map(c => `<span class="chip good">${esc(c)}</span>`).join("")}</div>
     <div class="lootGrid">${R.loot.map((p,i) => `<button class="choice${p.blue ? " blue" : ""}" data-l="${i}"><b>${esc(p.label)}</b>${p.detail ? `<span>${esc(p.detail)}</span>` : ""}</button>`).join("")}</div>`);
   $("panel").querySelectorAll("[data-l]").forEach(b => b.addEventListener("click", () => takeLoot(+b.dataset.l)));
 }
+// a wreck's scrap, FTL style: grows with the ship's tier and size and with the sector
+function lootScrap(foe, captured){
+  const tier = foe.tier || 0, Q = MOD.rules, L = {base: Q.lootBase ?? 10, perTier: Q.lootPerTier ?? 7, perSector: Q.lootPerSector ?? 2, sectorMult: Q.lootSectorMult ?? 0};
+  return Math.round((L.base + tier*L.perTier)*(0.8 + Math.random()*0.4)*(captured ? 1.5 : 1)*(sizeRule(foe).scrap || 1)*(1 + (L.sectorMult || 0)*(R.sector - 1))) + R.sector*L.perSector;
+}
 function takeLoot(i){
   const r = R.loot[i], you = R.you;
+  if (!r) return;
   AUDIO.sfx("click");
+  R.pendingArrive = null; R.loot = null; // the beacon is done: a reload from here comes back to the map
   if (r.kind === "weapon"){ const w = makeWeapon(r.weapon, false); if (w && you.weapons.length < 4) you.weapons.push(w); }
   if (r.kind === "reactor") you.reactor += r.amount;
   if (r.kind === "system") addSystem(you, r.system, r.amount);
@@ -6054,8 +6148,7 @@ function sectorIntro(first){
     if (!R.arc) R.arc = arc;
     const s = arc.sectors[R.sector-1];
     sheet(`<h3>SECTOR ${R.sector} OF ${SECTORS}</h3><h2>${esc(s.name)}</h2>
-      ${first ? `<div class="prose">${esc(arc.threat.what)}</div>` : ""}
-      <div class="prose">${esc(fillNames(s.intro))}</div>
+      <div class="prose">${esc(fillNames(first ? arc.threat.what : s.intro))}</div>
       <div class="btnRow"><button class="btn primary" id="cont">${first ? "LAUNCH" : "CONTINUE"}</button></div>`);
     $("cont").addEventListener("click", () => { AUDIO.unlock(); AUDIO.sfx("click"); returnToMap(); showBanner(`SECTOR ${R.sector}`, s.name); AUDIO.sting("sector"); requestPack(); });
   };
@@ -6718,7 +6811,7 @@ function epicArc(e){ const a = clone(e.arc); a.cast = []; Object.assign(a, fateO
    ============================================================ */
 const coach = Object.assign({seen: [], off: false}, lsGet("ftlr.tips") || {}), coachSave = () => lsSet("ftlr.tips", {seen: coach.seen, off: coach.off});
 // The first fight's script (docs/COMBAT-RULES.md FT1-FT4): a PICKET pirate with 8 hull that never runs or
-// surrenders, your laser nearly charged, their first gun firing at about 5.5 s, the missile bar moved over for you
+// surrenders, your laser nearly charged, their first gun firing at about 5.5 s, Artemis 70% charged after the first volley
 const FT = {line: "Fresh clone, borrowed ship. Let's see what this one's made of.", tpl: "PICKET", name: "PIRATE RAIDER", hull: 8,
   laser: 0.85, gunAt: 5.5, artemis: 0.7, scrap: 30, beat: 3.2};
 function firstTurnDue(shipId){ return !coach.off && !lsGet("ftlr.ft") && !(UNI.runs > 0) && (shipId || MOD.player.id) === MOD.player.id; }
@@ -6837,12 +6930,12 @@ function ftDone(){
   lsSet("ftlr.ft", 1); R.ftGoal = true;
   if (!coach.seen.includes("aim")){ coach.seen.push("aim"); coachSave(); } // aiming was taught by doing
 }
-// Artemis comes online for you: the medbay's bar moves to the launcher (nobody is hurt yet)
+// Artemis is already powered (the Kestrel launches with both guns on and the medbay off, Playable v1): after the
+// first volley it is at least 70% charged, and the cue says to fire it
 function ftMissiles(){
-  const you = S.you, w = you.weapons[1], m = you.sys.medbay; if (!w || w.on) return;
-  if (reactorFree(you) < w.power && m && m.power > 0){ m.power--; m.want = m.power; }
-  if (reactorFree(you) >= w.power && weaponsDraw(you) + w.power <= cap(you, "weapons")){ w.on = true; w.want = true; w.charge = w.cd*FT.artemis; }
-  float(you, "weapons", "MISSILES ONLINE", "#ffc857"); AUDIO.sfx("signal"); buildDeck();
+  const you = S.you, w = you.weapons[1]; if (!w || !w.on) return;
+  w.charge = Math.max(w.charge, w.cd*FT.artemis);
+  float(you, "weapons", "MISSILES READY", "#ffc857"); AUDIO.sfx("signal"); buildDeck();
 }
 // what the first fight asks for right now (the cue reads it every frame)
 function ftView(){
@@ -6860,7 +6953,7 @@ function ftView(){
   if (coach.off) return null;
   if (ft.step === "laser") return {text: "Tap your laser", glow: "#w0", side: "R"};
   if (ft.step === "aim") return {text: "Tap their shields", room: ["foe", room(S.foe, "shields") ? "shields" : S.foe.layout[0].id], side: "R"};
-  if (ft.step === "missile") return {text: "Missiles online. Tap ARTEMIS", glow: "#w1", side: "R"};
+  if (ft.step === "missile") return {text: "Tap ARTEMIS", glow: "#w1", side: "R"};
   if (ft.step === "maim") return {text: "Tap their weapons", room: ["foe", room(S.foe, "weapons") ? "weapons" : S.foe.layout[0].id], side: "R"};
   return null;
 }
@@ -7078,7 +7171,70 @@ const EVENT_POOL = [
     {label:"Buy the rig's salvage, leave her fuel", outcomes:[{text:"A fair price, by the market. She takes it without looking at you.", effects:{scrap:35, fuel:-1}}]},
     {label:"Tow the rig to a station", outcomes:[
       {p:0.6, text:"At the station she gives you her father's old gun, still in its grease. \"He'd want it used.\"", effects:{threat:1, weapon:"random"}},
-      {p:0.4, text:"She thanks you, and means it.", effects:{threat:1, rep:1, crewHp:10}}]}]}
+      {p:0.4, text:"She thanks you, and means it.", effects:{threat:1, rep:1, crewHp:10}}]}]},
+  // Playable v1 (2026-10-04): more of the sector to cross, so more to find on the way. Several are fuel stops
+  // (no sector should leave you dry), each with a catch.
+  {id:"tanker", title:"The Drifting Tanker", text:"A fuel tanker hangs at the beacon with its running lights on and its crew gone. The tanks read nearly full. The airlock log shows the last person out was in a hurry, and didn't close it.",
+   choices:[
+    {label:"Siphon the tanks", outcomes:[
+      {p:0.7, text:"Clean fuel, hours of it. {crew} keeps glancing at the open airlock the whole time and doesn't say why.", effects:{fuel:4}},
+      {p:0.3, text:"You get half the fuel aboard before whatever emptied the tanker comes back for the rest. It was waiting in the dark beyond the beacon.", effects:{fuel:2, fight:{name:"SCAVENGER"}}}]},
+    {label:"Search the crew decks first", away:{skill:"combat"}, outcomes:[
+      {text:"{away} finds the crew's stash behind a galley panel, and the reason they left: a scavenger crew's calling card, scratched into the bulkhead. You take both.", effects:{fuel:3, scrap:30}},
+      {text:"{away} finds the scavengers. Or they find {away}. The fuel is still there afterwards.", effects:{fuel:3, awayHurt:40}}]},
+    {label:"Tow it to the next station and claim the bounty", outcomes:[{text:"The station pays a finder's fee and asks no questions. The slow tow does not go unnoticed behind you.", effects:{scrap:45, fuel:1, threat:1}}]}]},
+  {id:"refinery", title:"The Ice Refinery", text:"A one-woman refinery on a comet's tail, cracking ice into fuel. She is happy to sell. She is happier to trade: her coolant pump is failing and her nearest mechanic is a month away.",
+   choices:[
+    {label:"Buy fuel at her price", req:{scrap:20}, outcomes:[{text:"Twenty scrap, four cells, and a thermos of something she swears is coffee.", effects:{fuel:4}}]},
+    {label:"Fix her pump for fuel", req:{crew:"repair"}, outcomes:[{text:"Your mechanic has the pump running in an hour and her refinery running better than it did new. She fills your tanks and won't take a thing.", effects:{fuel:5, rep:1}}]},
+    {label:"Send someone over to fix it anyway", away:{skill:"repair"}, outcomes:[
+      {text:"{away} comes back covered in coolant and grinning. She pays in fuel, and in a star chart with the pursuit's last sighting marked on it.", effects:{fuel:3, threat:-1}},
+      {text:"The pump bursts in {away}'s face. She pays anyway, for the trying.", effects:{fuel:2, awayHurt:30}}]}]},
+  {id:"convoy", title:"The Refugee Convoy", text:"Eleven ships, none of them armed, all of them low on everything. Their lead pilot asks if you'd fly escort to the next beacon. She can't pay. She looks at your scopes, at what's behind you, and asks anyway.",
+   choices:[
+    {label:"Fly escort", outcomes:[
+      {p:0.6, text:"Nothing comes. At the next beacon every ship in the convoy sends you something: a fuel cell here, a box of parts there. It adds up.", effects:{fuel:2, scrap:25, missiles:2}},
+      {p:0.4, text:"Something comes. You hold it off long enough for the convoy to jump, and then it's just you and it.", effects:{fight:{}, rep:2}}]},
+    {label:"Give them a fuel cell and wish them luck", outcomes:[{text:"It isn't much. The lead pilot salutes you anyway, and you keep her call sign on the board for a long time.", effects:{fuel:-1, rep:2, crewHp:15}}]},
+    {label:"Sell them your spare missiles", outcomes:[{text:"They pay in what they have, which is scrap and fuel. You don't ask how they'll use the missiles.", effects:{missiles:-3, scrap:30, fuel:1}}]}]},
+  {id:"depot", title:"The Abandoned Depot", text:"A navy supply depot, written off in the last war and never stripped. Its automated defences are still awake, still loyal to a navy that doesn't exist. The racks inside are full.",
+   choices:[
+    {label:"Shoot your way in", outcomes:[{text:"The defence platform doesn't negotiate.", effects:{fight:{name:"DEPOT GUARD"}, missiles:4, fuel:2}}]},
+    {label:"Talk to the depot's computer", req:{crew:"pilot"}, outcomes:[{text:"Your pilot finds an old navy handshake in the ship's library. The depot opens its doors to a ship that, as far as it knows, is on its side.", effects:{missiles:4, fuel:3, scrap:20}}]},
+    {label:"Strip the outer racks and go", outcomes:[
+      {p:0.65, text:"Quick work, and the turrets never wake up properly.", effects:{fuel:2, missiles:2}},
+      {p:0.35, text:"One turret wakes up properly.", effects:{fuel:2, missiles:2, hull:-5}}]}]},
+  {id:"bounty", title:"Wanted Poster", text:"A bounty beacon, broadcasting a face and a ship. The ship is close: a smuggler, running hot, hiding in the beacon's shadow. The reward is real. So is the smuggler's offer, arriving a minute later on a private band.",
+   choices:[
+    {label:"Collect the bounty", outcomes:[{text:"He won't go quietly.", effects:{fight:{name:"SMUGGLER"}, scrap:30}}]},
+    {label:"Take the smuggler's offer", outcomes:[{text:"Fuel and scrap to look the other way, paid up front. The bounty hunters who arrive an hour later are not pleased to find you instead.", effects:{fuel:2, scrap:35, debt:{tag:"bounty", text:"The bounty hunters filed your transponder with the guild."}}}]},
+    {label:"Leave them to it", outcomes:[{text:"Not your fight. You jump before anyone asks you to make it one.", effects:{}}]}]},
+  {id:"beacon", title:"The Silent Beacon", text:"The navigation beacon here has been switched off by hand. Someone climbed out to it in a suit and pulled the breaker. The suit is still floating next to it, tethered, empty.",
+   choices:[
+    {label:"Switch it back on", outcomes:[
+      {p:0.5, text:"The beacon wakes and shows you every lane in the sector, including the quiet ones.", effects:{threat:-1}},
+      {p:0.5, text:"The beacon wakes, and so does everything that was waiting for it to. You jump before it finishes saying hello.", effects:{threat:1, scrap:20}}]},
+    {label:"Recover the suit", away:{skill:"pilot"}, outcomes:[
+      {text:"{away} brings the suit home. The helmet log is a warning, recorded over and over: not this lane. You take another one.", effects:{threat:-1, crewHp:10}},
+      {text:"The tether snaps on the way back. {away} makes it, barely, on suit thrusters alone.", effects:{awayHurt:25}}]},
+    {label:"Leave it dark", outcomes:[{text:"Whoever turned it off had a reason. You respect it and move on.", effects:{rep:1}}]}]},
+  {id:"gambler", title:"The Gambler's Wheel", text:"A casino barge, lit like a festival, parked at the beacon. The house plays one game: a wheel of fuel, scrap and nothing. The croupier is a very old robot who has never once been caught cheating.",
+   choices:[
+    {label:"Bet thirty scrap", req:{scrap:30}, outcomes:[
+      {p:0.45, text:"The wheel stops on fuel, and the robot pays out without a flicker.", effects:{fuel:3, scrap:20}},
+      {p:0.2, text:"The wheel stops on scrap. The house pays double, which it says hasn't happened in a year.", effects:{scrap:60}},
+      {p:0.35, text:"The wheel stops on nothing. The robot says better luck next time, and means it.", effects:{}}]},
+    {label:"Buy a round for the house", req:{scrap:10}, outcomes:[{text:"A pilot at the bar has been waiting for a ship heading your way. She buys the next round, and asks to come along.", effects:{crew:{bonus:"pilot"}}}]},
+    {label:"Watch the wheel and leave", outcomes:[{text:"{crew} spends an hour watching it and swears there's a pattern. There isn't.", effects:{crewHp:10}}]}]},
+  {id:"wreckfield", title:"The Wreck Field", text:"A battle happened here a week ago. Both fleets are gone. The wrecks are still warm, and nobody has come to pick them over yet.",
+   choices:[
+    {label:"Pick over the wrecks", outcomes:[
+      {p:0.6, text:"Fuel from the tanks, scrap from the hulls, and a crate of missiles nobody had time to fire.", effects:{fuel:2, scrap:35, missiles:2}},
+      {p:0.4, text:"One wreck isn't as dead as it looks. Its point defence fires once before you silence it.", effects:{fuel:2, scrap:25, hull:-4}}]},
+    {label:"Search for survivors", outcomes:[
+      {p:0.5, text:"One, in an escape pod with an hour of air left. He was a gunner. He'd like to be one again.", effects:{crew:{bonus:"weapons"}}},
+      {p:0.5, text:"No one. You log the ship names for whoever comes looking.", effects:{rep:1}}]},
+    {label:"Take the lane the fleets cleared", outcomes:[{text:"Their fight swept this lane clean of everything. You make good time.", effects:{threat:-1}}]}]}
 ];
 const RECKONINGS = {
   lifeboat:{title:"The Lifeboat Remembers", text:"A gunship drops out of the jump wake with your ship's name painted across its prow in white. One of the three from the lifeboat is flying it.",
@@ -7223,7 +7379,7 @@ Return ONLY JSON: {"text":"..."${won ? "" : `,"log":"..."`}}`;
 let modHistory = [], modStack = [];
 const MOD_DOC = "mods/current";
 const ENGINE_NOTES = `ENGINE CONTRACT (what the code can run; stay inside it):
-- version: keep 7.
+- version: keep 8.
 - rules: numeric tuning values (some are tables by level, e.g. medbayHeal [0, 6.4, 9.6, 19.2]); keep every existing key, you may change values.
 - weapons: {id: {name, type, shots, dmg, cd, power, price, tier 0-3, fire?, breach?, sp? (shield piercing: layers it passes untouched), len? (beam rooms), ion? (ion strength), chain? (charge speed-up per volley, e.g. 0.15), flak? (true: shots cluster on the aimed room, some land next door)}}. type is laser | missile | ion | beam.
   laser: each shot is stopped by one shield layer (and pops it). missile: ignores shields, uses 1 missile. ion: 0 damage; pops a layer and locks a bar for rules.ionDuration s. beam: damage minus the target's shield layers.
@@ -7282,13 +7438,19 @@ const V6_VALUES = [
   ["bosses.swarm.weapons", ["flak","basic"]], ["bosses.swarm.systems.weapons", {level:5}],
   ...[0, 2, 4, 6, 7, 8, 9, 10].map(i => [`enemies.${i}.flees`, undefined])
 ];
+// v7 -> v8 (Playable v1, 2026-10-04: economy, bosses, the Kestrel's opening power): every value it changed, as it was in v7
+const V7_VALUES = [
+  ["player.systems.medbay", {level:1,power:1}],
+  ["boss.hull", 40], ["boss.systems.shields", {level:8}], ["boss.systems.weapons", {level:7}], ["boss.weapons", ["heavy2","burst2","ion","basic"]],
+  ["bosses.swarm.hull", 44], ["bosses.swarm.hull", 48], ["bosses.swarm.crew", 7], ["bosses.swarm.systems.drones", {level:5}], ["bosses.swarm.drones", ["combat","combat","defense"]],
+  ["bosses.void.hull", 36], ["bosses.void.systems.weapons", {level:10}], ["bosses.void.systems.cloak", {level:3}], ["bosses.void.systems.engines", {level:5}], ["bosses.void.weapons", ["heavyion","heavy2","pike","burst2","basic"]]
+];
 function pathGet(o, path){ return path.split(".").reduce((a, k) => a == null ? undefined : a[k], o); }
 function pathSet(o, path, v){ const ks = path.split("."), last = ks.pop(), parent = ks.reduce((a, k) => a == null ? undefined : a[k], o); if (parent && typeof parent === "object") parent[last] = v; }
 // keep every change the captain made: v4 -> v5 adds only what oxygen needs; v5 -> v6 swaps in the audited values
 function migrateMod(m){
-  // a saved v7 mod from before a rule was added: keep everything the captain set, take the new rules' defaults
-  if (m && m.version === 7 && m.rules && Object.keys(DEFAULT_MOD.rules).some(k => !(k in m.rules))){ try { m = clone(m); m.rules = {...DEFAULT_MOD.rules, ...m.rules}; } catch { return null; } return m; }
-  if (!m || (m.version !== 4 && m.version !== 5 && m.version !== 6)) return m;
+  if (!m || (m.version !== 4 && m.version !== 5 && m.version !== 6 && m.version !== 7)) return m;
+  if (m.version === 7) return migrate78(m);
   if (m.version === 6) return migrate67(m);
   try {
     m = clone(m);
@@ -7311,6 +7473,15 @@ function migrate67(m){
     for (const [path, old] of V6_VALUES){ const cur = pathGet(m, path); if (JSON.stringify(cur) === JSON.stringify(old)) pathSet(m, path, clone(pathGet(DEFAULT_MOD, path) ?? null)); }
     m.rules = {...DEFAULT_MOD.rules, ...m.rules};
     m.version = 7;
+    return migrate78(m);
+  } catch { return null; }
+}
+function migrate78(m){
+  try {
+    m = clone(m);
+    for (const [path, old] of V7_VALUES){ const cur = pathGet(m, path); if (JSON.stringify(cur) === JSON.stringify(old)) pathSet(m, path, clone(pathGet(DEFAULT_MOD, path) ?? null)); }
+    m.rules = {...DEFAULT_MOD.rules, ...m.rules};
+    m.version = 8;
     return m;
   } catch { return null; }
 }
@@ -7692,7 +7863,10 @@ const AUDIO = (() => {
       const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
       try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch {} // iOS: the game's own SOUND setting rules, not the ring switch
       ctx = new AC({latencyHint: "interactive"});
-      build(ctx, ctx.destination);
+      // an automated test browser (navigator.webdriver) runs the whole sound engine into a muted output: the QA
+      // scripts were playing the game out loud on the iMac's speakers (Michael, 2026-10-04)
+      let out = ctx.destination; if (navigator.webdriver){ out = ctx.createGain(); out.gain.value = 0; out.connect(ctx.destination); }
+      build(ctx, out);
       applyMode();
       loadSfx().then(() => { sfxReady = true; applyMode(); });
       timer = setInterval(tick, 50);
