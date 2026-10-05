@@ -362,6 +362,18 @@ body.land .sys .pw b{width:9px;height:7px}
 body.land .sys.off{filter:saturate(.35) brightness(.75)}
 body.land .sys.hurt{box-shadow:inset 0 0 12px rgba(255,80,50,.55)}
 .sys.s-shields{--tint:#3f9cff}.sys.s-engines{--tint:#ff8a2a}.sys.s-medbay{--tint:#3fd27a}.sys.s-oxygen{--tint:#3fc8ec}.sys.s-cloak{--tint:#9d6bff}
+/* Michael, 2026-10-04: "these should be full size": PILOT, SENSORS, DOORS and WEAPONS are full rows like the powered systems above
+   (same frame, icon, full name and bar), one per row; still display only (no power taps), DOORS still the door control */
+body.land .subsys{display:flex;flex-direction:column;gap:4px}
+body.land .ss{position:relative;display:grid;grid-template-columns:30px minmax(0,1fr);grid-template-rows:auto auto;column-gap:6px;row-gap:4px;align-items:center;align-content:center;height:auto;min-height:40px;padding:7px 9px 7px 8px;border:0;border-image:url(art/ui_frame_button.png) 40 / 8px stretch;border-radius:8px;
+  background:linear-gradient(90deg,color-mix(in srgb,var(--tint,#3fc8ec) 30%,#0b1626),#0b1626 85%);box-shadow:inset 0 0 10px color-mix(in srgb,var(--tint,#3fc8ec) 25%,transparent)}
+body.land .ss img{grid-row:1/3;width:30px;height:30px;object-fit:contain;filter:drop-shadow(0 0 3px rgba(0,0,0,.6))}
+body.land .ss .lbl{font:600 11px/1 var(--display);letter-spacing:.1em;color:#eaf6ff;align-self:end;white-space:nowrap}
+body.land .ss .pw{align-self:start}
+body.land .ss .pw b{width:9px;height:7px}
+body.land .ss.hurt{box-shadow:inset 0 0 12px rgba(255,80,50,.55)}
+.ss.s-pilot{--tint:#5aa8ff}.ss.s-sensors{--tint:#3fd2a8}.ss.s-doors{--tint:#e6c23a}.ss.s-weapons{--tint:#ff6a4a}
+
 /* the subsystems (pilot, sensors, doors) and the weapons system: bars and damage only, no power taps (CONVENTIONS 3) */
 .subsys{grid-column:1/-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px}
 .ss{display:flex;align-items:center;gap:4px;min-width:0;height:26px;box-sizing:border-box;padding:0 5px;border:1px solid rgba(127,216,255,.28);border-radius:5px;background:rgba(13,20,32,.82)}
@@ -390,6 +402,7 @@ body.land .wep.sel{box-shadow:0 0 0 2px var(--gold),0 0 14px rgba(255,194,74,.6)
 body.land .wep::before{-webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 6px),#000 calc(100% - 5px));mask:radial-gradient(farthest-side,transparent calc(100% - 6px),#000 calc(100% - 5px))}
 body.land .wep .cn{position:absolute;left:-5px;top:-3px;z-index:2;min-width:14px;font:700 10px/1 var(--mono,"IBM Plex Mono",monospace);text-align:center;padding:2px 3px;border-radius:6px;background:rgba(6,12,22,.92);border:1px solid rgba(255,200,87,.6);color:#ffd88a}
 body.land .wep .cn:empty{display:none}
+body.land .wep .cn.full{border-color:rgba(131,148,179,.5);color:#9fb0cc} /* not charging: the full load time */
 body.land .wep.aim::before{animation:aimPulse .8s ease-in-out infinite}
 body.land .wep.aim{box-shadow:0 0 0 2px #ffb33a,0 0 16px rgba(255,179,58,.75)}
 body.land .wep.aim .tgt{background:#3a2606;border-color:#ffb33a;color:#ffd88a}
@@ -528,6 +541,45 @@ body.ftBeat #deckFight, body.ftBeat #sensBtn{visibility:hidden}
 .keyRow{display:grid;grid-template-columns:minmax(150px,auto) 1fr;gap:12px;align-items:center;font-size:12px;color:#d7ecf8}
 .keyRow kbd{display:inline-block;min-width:16px;text-align:center;padding:2px 6px;margin:1px 0;border-radius:5px;border:1px solid var(--edgeDim);background:#0b1626;box-shadow:inset 0 -2px 0 rgba(63,200,236,.18);font:600 11px var(--display);color:#eaf6ff}
 .top #keysBtn{min-width:0}
+
+/* ===== Michael, 2026-10-04 evening: no top bar (SENSOR VIEW, VIEW, SOUND and KEYS go; SOUND and KEYS stay on the opening
+   screen, a tap on the small ship still swaps, ? still lists the keys); hull, scrap, fuel and missiles float centred at the
+   top; the systems heading is one line (REACTOR bars, FREE) ===== */
+body.land .top{display:none}
+body.land #deckFight{top:0}
+body.land #deckMap{top:4px}
+body.land #field .hudRes{position:absolute;top:4px;left:50%;transform:translateX(-50%);z-index:3;pointer-events:none;display:flex;gap:14px;padding:3px 12px;border-radius:12px;background:rgba(4,8,16,.72);border:1px solid rgba(63,200,236,.25);font:600 10.5px var(--display);letter-spacing:.08em}
+body.land[data-mode="title"] #field .hudRes,body.land[data-mode="over"] #field .hudRes{display:none}
+body.land .hint{top:44px}
+body.land #sysBox .rowLabel.sysHead{flex-direction:row;align-items:center;margin:0}
+body.land .reactor{white-space:nowrap}
+
+/* ===== FTL's layout (Michael, 2026-10-04: "make it just like FTL and master that"; he picked the bottom strip): the systems
+   are a row of icons along the bottom left, each with its power bars stacked above it, the reactor first; the crew stack
+   down the left edge; both ships get the full width between them. Swipe a system up for power, down for less, as before. ===== */
+body.land #sysBox{left:6px;right:auto;top:auto;bottom:6px;width:auto;max-height:none;height:auto;overflow:visible;display:flex;flex-direction:row;align-items:flex-end;gap:4px;padding:0}
+body.land #sysBox .rowLabel.sysHead{display:flex!important;flex-direction:column;align-items:center;justify-content:flex-end;gap:2px;margin:0;padding:3px 4px;border-radius:7px;background:rgba(4,8,16,.72);border:1px solid rgba(63,200,236,.25);align-self:stretch}
+body.land .reactor{display:flex;flex-direction:column;align-items:center;gap:3px;font:600 8px var(--display);letter-spacing:.06em}
+body.land .reactor::before{content:"PWR";font-size:7.5px}
+body.land .reactor .pw{display:flex;flex-direction:column-reverse;gap:2px}
+body.land .reactor .pw b{width:14px;height:5px}
+body.land #systems{display:flex;flex-direction:row;align-items:flex-end;gap:4px}
+body.land .subsys{display:contents}
+body.land .sys,body.land .ss{display:flex;flex-direction:column-reverse;align-items:center;justify-content:flex-start;gap:3px;width:42px;min-height:0;height:auto;padding:4px 3px 3px;box-sizing:border-box;flex:none;max-height:none}
+body.land .sys .ico,body.land .ss img{width:28px;height:28px;flex:none;grid-row:auto}
+body.land .sys .lbl,body.land .ss .lbl{display:none}
+body.land .sys .pw,body.land .ss .pw{display:flex;flex-direction:column-reverse;gap:2px;align-self:center;justify-self:auto;max-width:none;overflow:visible}
+body.land .sys .pw b,body.land .ss .pw b{width:18px;height:5px}
+body.land .sys .hz,body.land .ss .hz{position:absolute;top:-12px;left:50%;transform:translateX(-50%);white-space:nowrap}
+body.land .ss.s-doors .lbl#sl_doors{display:none}
+body.land #crewBox{left:6px;right:auto;top:44px;bottom:auto;width:52px;display:block;pointer-events:none}
+body.land #crewBox .crewRow{flex-direction:column;flex-wrap:nowrap;gap:2px;align-items:center}
+body.land .hint{left:64px}
+body.land .wep .cn{top:auto;bottom:10px;left:-8px} /* the load time sits low-left, clear of the tag (NO REACTOR, AIM) */
+body.land[data-mode="map"] #field .hudRes{left:calc((100% - 300px)/2);top:auto;bottom:8px} /* the map: centred over the chart, clear of the side panel */
+body.land .sys .ico,body.land .ss img,.wep img,.crewCard img{pointer-events:none;-webkit-user-drag:none;user-select:none} /* a swipe on a system never drags its icon picture (it swallowed the swipe on desktop) */
+body.land .wep .nm .pw{display:inline-flex;gap:1.5px;margin-left:4px;vertical-align:middle} /* the power it needs, lit when it has it (Michael, 2026-10-04) */
+body.land .wep .nm .pw b{width:4px;height:7px}
 </style>
 
 <div id="stage"><!-- sideways only: when the phone is upright this whole stage turns 90 degrees (body.rot) -->
@@ -537,7 +589,6 @@ body.ftBeat #deckFight, body.ftBeat #sensBtn{visibility:hidden}
   <div class="top">
     <div class="brand">FTL<i>:</i> REDUX</div>
     <div class="sector" id="sector">&nbsp;</div>
-    <div class="hudRes" id="hudRes"></div>
     <div class="grow"></div>
     <button class="sensTog" id="sensBtn" aria-label="Sensor view: show the enemy ship big" aria-pressed="false" hidden><span>SENSOR VIEW</span><i></i></button><button class="topBtn ai" id="aiBtn" hidden>SHIP'S AI</button><button class="topBtn" id="viewBtn" aria-label="Camera view" hidden>VIEW B</button><button class="topBtn" id="sndBtn" aria-label="Sound">SOUND</button>
   </div>
@@ -546,6 +597,7 @@ body.ftBeat #deckFight, body.ftBeat #sensBtn{visibility:hidden}
     <canvas id="bg"></canvas>
     <canvas id="cv"></canvas>
     <div class="banner" id="banner"></div>
+    <div class="hudRes" id="hudRes"></div>
     <div id="eulogy" hidden></div>
     <div class="hint" id="hint"></div>
     <div class="cue" id="cue" hidden role="status"><span id="cueText"></span></div>
@@ -560,7 +612,7 @@ body.ftBeat #deckFight, body.ftBeat #sensBtn{visibility:hidden}
       <div class="weps" id="weps"></div>
     </div>
     <div id="sysBox">
-      <div class="rowLabel sysHead"><span>SYSTEMS</span><span class="reactor" id="reactor"></span></div>
+      <div class="rowLabel sysHead"><span class="reactor" id="reactor"></span></div>
       <div class="row" id="systems"></div>
     </div>
     <div id="crewBox">
@@ -661,6 +713,8 @@ const DEFAULT_MOD = {
     o2Flow: 0.25,              // how fast two rooms even out through an open door (share of the difference per second); a sealed door holds air (FTL O5)
     o2Suffocate: 5,            // below this % in their room crew start to suffocate (FTL O6)
     suffocateDps: 5.5,         // hp per second lost while suffocating (measured: ~5.5)
+    ventExposeDps: 25,         // hp per second for anyone without a suit in a room whose airlocks are open, once its air is under ventExposeAt (Michael, 2026-10-04: opened to space, the unsuited die)
+    ventExposeAt: 50,          // % air below which an open airlock is hard vacuum (the room empties in ~2 s, so crew walking out are not caught)
     fireO2Burn: 1,             // % per second a burning room consumes (FTL F3: 0.96)
     fireNeedsO2: 10,           // a fire goes out below this % (FTL F4)
     doorBoarderDrag: 0         // (retired: boarders now stop and break each door, doorHp)
@@ -830,12 +884,12 @@ const DEFAULT_MOD = {
   },
   boss: {name:"FLAGSHIP", size:"large", tier:4, hull:30, crew:7, combat:true, missiles:12,
     systems:{shields:{level:6},weapons:{level:6},engines:{level:4},pilot:{level:1},cloak:{level:1},drones:{level:2},tele:{level:1}},
-    weapons:["heavy","burst2","ion"], drones:["defense"], phase2:["hermes","glaive"]},
+    weapons:["heavy","burst2","ion"], drones:["defense"], phase2:["glaive"]}, // (2026-10-04: no Hermes in phase 2: boarders now wait for its shields to drop, TE2)
   // The final enemy depends on what has been chasing you. Fleets and novas end on the boss above.
   bosses: {
     swarm: {name:"BROODMOTHER", size:"large", tier:4, hull:42, crew:10, species:"myrm", combat:true, missiles:6,
       systems:{shields:{level:4},weapons:{level:6},engines:{level:3},pilot:{level:1},drones:{level:3},tele:{level:1}},
-      weapons:["flak","basic","basic"], drones:["defense"], phase2:["chain"]},
+      weapons:["flak","basic"], drones:["defense"], phase2:["chain"]}, // (2026-10-04: one basic laser less, for TE2)
     void:  {name:"THE HOLLOW", size:"large", tier:4, hull:26, crew:5, species:"lumen", missiles:8,
       systems:{shields:{level:6},weapons:{level:6},engines:{level:4},pilot:{level:1},cloak:{level:1}},
       weapons:["heavyion","heavy","burst2"], drones:[], phase2:["glaive","ion"]}
@@ -1282,9 +1336,12 @@ function ignite(ship, rid, kind){
   }
   h[kind] = 100;
 }
+// what a weapon fires, in words (Michael, 2026-10-04: "I'm not sure what 3x1 means on the weapons")
+function wepShots(w){ if (w.type === "ion") return `ion ${w.ion || 1}`; if (w.type === "beam") return `${w.dmg} damage a room · ${w.len || 1} room${(w.len || 1) > 1 ? "s" : ""}`;
+  return `${w.shots} shot${w.shots > 1 ? "s" : ""} · ${w.dmg} damage${w.shots > 1 ? " each" : ""}`; }
 function weaponInfo(w){
   const t = {laser:"LASER", missile:"MISSILE", beam:"BEAM", ion:"ION"}[w.type];
-  const main = w.type === "ion" ? `${w.ion || 1} ion` : w.type === "beam" ? `${w.dmg} per room · ${w.len || 1} room${(w.len||1) > 1 ? "s" : ""}` : `${w.shots}×${w.dmg}`;
+  const main = wepShots(w);
   const tags = [];
   if (w.type === "laser") tags.push(`pops ${w.shots} shield${w.shots > 1 ? "s" : ""}`);
   if (w.bomb) tags.push("bomb: teleported in, never misses, skips shields and drones, uses missiles");
@@ -1296,7 +1353,7 @@ function weaponInfo(w){
   if (w.chain) tags.push("charges faster each volley");
   if (w.fire) tags.push(`fire ${Math.round(w.fire*100)}%`);
   if (w.breach) tags.push(`breach ${Math.round(w.breach*100)}%`);
-  return {head:`${t} · ${main} · ${w.cd}s · ${w.power} power`, tags:tags.join(" · ")};
+  return {head:`${t} · ${main} · ${w.cd}s to load · needs ${w.power} power`, tags:tags.join(" · ")};
 }
 
 /* ---------------- survival encounters: no enemy ship, the place itself attacks ---------------- */
@@ -1560,6 +1617,8 @@ function updateOxygen(ship, dt){
   for (const c of allCrew()){
     if (c.hp <= 0 || c.on !== ship.key || SP(c).nobreath) continue;
     if ((ship.o2[c.room] ?? 100) < R_.o2Suffocate){ c.hp -= R_.suffocateDps*dt; c.cause = "suffocated"; }
+    // airlocks open to space: anyone without a suit is exposed and dies within seconds (Michael, 2026-10-04); suits come with crew gear
+    if (ship.vent && ship.vent[c.room] && !c.suit && (ship.o2[c.room] ?? 100) < (R_.ventExposeAt ?? 50)){ c.hp -= (R_.ventExposeDps ?? 25)*dt; c.cause = "spaced"; }
   }
 }
 // where a crew member stands in the room they are headed for: its station if they work it, else a floor spot of
@@ -1680,7 +1739,8 @@ function enemyAI(dt = 0.4){
   }
   // sector 1 teaches boarding instead of ending the run with it: one boarder, not before 25 s (QA 2026-10-04)
   const s1 = !R || R.sector <= 1, party = s1 ? 1 : 2;
-  if (f.sys.tele && f.teleCharge >= 1 && eff(f,"tele") > 0 && S.t >= (s1 ? 25 : (MOD.rules.enemyQuietTime || 0)) && !you.crew.every(c => c.hp <= 0)){
+  // nobody beams onto a ship whose shields are up (Michael, 2026-10-04): their boarders wait for your shields to drop
+  if (f.sys.tele && f.teleCharge >= 1 && eff(f,"tele") > 0 && !(you.layers > 0) && S.t >= (s1 ? 25 : (MOD.rules.enemyQuietTime || 0)) && !you.crew.every(c => c.hp <= 0)){
     const onYou = f.crew.filter(c => c.hp > 0 && c.on === "you").length;
     const avail = home.filter(c => c.station !== "pilot" && !c._heal).sort((a,b) => SP(b).combat*b.hp - SP(a).combat*a.hp);
     const rid = boardTarget(you); // AI1: where it hurts you most, not a random room
@@ -1937,6 +1997,8 @@ function resize(){
   stars = Array.from({length:140}, () => ({x:Math.random()*W, y:Math.random()*H, z:rnd(.2,1)}));
   layout();
 }
+// the systems strip's height along the bottom (FTL's layout), in stage pixels; the ships stop above it
+function stripH(){ const el = $("sysBox"); if (!el || !el.offsetHeight) return 78; const a = stageRect(el), b = stageRect(cv); return Math.max(40, Math.round((b.top + b.height - a.top)/TS) + 4); }
 function layout(){
   if (!S || S.mode !== "fight") return;
   const H = PH();
@@ -1949,7 +2011,7 @@ function layout(){
     // and the hint the top. One ship fills the middle; the other waits in the window at the right (tap to swap).
     // the big ship gets everything right of the left column; the swap window and the weapons sit in its right
     // corners, where a ship's tapered nose leaves room
-    const Lw = 150, T = 30, B = 40, foc = S.focus === "foe" ? "foe" : "you";
+    const Lw = 70, T = 44, B = stripH(), foc = S.focus === "foe" ? "foe" : "you"; // FTL's layout: crew stack on the left, systems strip along the bottom
     refreshShape(S.you); if (!S.foe.env) refreshShape(S.foe);
     // the other ship's window, top right. With the enemy in it (your ship big, the usual view) it is a real view of
     // the enemy: about 40% of the width and 45% of the height, in the space right of your ship's nose (battle feel,
@@ -1960,8 +2022,10 @@ function layout(){
     if (S.foe.env){ g.you = fitShip(S.you, {x: Lw, y: T, w: W - Lw - 16, h: H - T - B}); g.foe = {cell: 1, ox: -9999, oy: -9999}; S.inset0 = null; }
     else { const other = foc === "you" ? "foe" : "you", kit = S[foc].cut && S[foc].cut.kit;
       // a kit ship (the scout): the whole hull, wing tip to wing tip, sits above the crew portraits
-      if (kit){ const el = $("crew"), cr = el && stageRect(el), cb = stageRect(cv), bot = cr && cr.height ? (cr.top - cb.top)/TS - 4 : H - B; big.y = 18; big.h = Math.max(120, bot - 18); }
-      g[foc] = fitShip(S[foc], big, true); g[other] = fitShip(S[other], insFit(small, other)); S.inset0 = {...small, key: other};
+      if (kit){ big.y = T; big.h = Math.max(120, H - B - T); } // the whole hull, wing tip to wing tip, between the top bars and the systems strip
+      g[foc] = fitShip(S[foc], big, true);
+      if (kit){ geo = g; const ca = cutArt(S[foc]); if (ca && ca.x < 2){ const o = 2 - ca.x; big.x += o; big.w -= o; g[foc] = fitShip(S[foc], big, true); } } // the painting, flames and all, stays on screen
+      g[other] = fitShip(S[other], insFit(small, other)); S.inset0 = {...small, key: other};
       // the whole ship stays clear of the swap window (a painted hull by its own outline; others by their rooms): shrink until it does
       // (an enemy whose hull runs full height to its stern, the raider, first sits down at the bottom of the box: its top clears the window that way)
       const sh = S[foc], rec = sh.cut && SHAPED[sh.cut.art];
@@ -2636,8 +2700,8 @@ function drawHullBar(ship){
   let bw = b.w + pad*2;
   const ins = S && S.inset && !S.foe.env ? S.inset : null; // phone swap layout: the big ship's bar runs along the top, the small ship's heads its window
   if (ins){ const land = document.body.classList.contains("land");
-    if (ins.key === ship.key){ bx = ins.x; by = ins.y - 12; bw = ins.w; } else if (land){ bx = 154; by = 6; bw = W - 154 - 330; } else { bx = 8; by = 6; bw = W - 16; } }
-  else if (S && S.foe && S.foe.env && ship.you && document.body.classList.contains("land")){ bx = 154; by = 6; bw = W - 154 - 330; } // hazard fights: your bar sits up top too, never under the crew portraits
+    if (ins.key === ship.key){ bx = ins.x; by = ins.y - 12; bw = ins.w; } else if (land){ bx = 68; by = 28; bw = Math.max(160, ins.x - 68 - 14); } else { bx = 8; by = 6; bw = W - 16; } }
+  else if (S && S.foe && S.foe.env && ship.you && document.body.classList.contains("land")){ bx = 68; by = 28; bw = W - 68 - 330; } // hazard fights: your bar sits up top too, never under the crew portraits
   X.font = `600 11px "Chakra Petch", sans-serif`; X.textBaseline = "middle"; X.textAlign = "left";
   const stat = `${ship.hull}  ⛨${ship.layers}  ◇${evasion(ship)}%${ship.fleeing ? `  FTL ${Math.round(ship.ftl*100)}%` : ""}`;
   X.font = `500 10px "IBM Plex Mono", monospace`; const statW = X.measureText(stat).width;
@@ -2779,7 +2843,11 @@ function hullSkin(ship){
   ship._skin = {key, c, P, x0: -padX, y0: -padY, w: cw/P, h: ch/P};
   return ship._skin;
 }
+// a painted ship whose painting has not loaded yet draws nothing (Michael, 2026-10-04: "when the ship loads there is
+// another ship that shows momentarily": the code-drawn stand-in hull flashed before the painting arrived)
+function paintPending(ship){ const kd = typeof kitDef === "function" && kitDef(ship); if (!kd || !kd.painted) return false; refreshShape(ship); return !(ship.cut && SHAPED[ship.cut.art]); }
 function drawShip(ship, dt){
+  if (paintPending(ship)){ ship._deck = null; return; }
   if (STAGE.ok) return drawDeck(ship, dt);
   const art = hullArt(ship), b = shipBox(ship), g = G(ship), cx = b.x + b.w/2, cy = b.y + b.h/2;
   const running = S && !S.paused && !S.over;
@@ -3080,6 +3148,8 @@ cv.addEventListener("pointerdown", e => {
     if (c && (c.on === "you" ? fr : yr)){ setHint("Crew cross between ships only by teleporter."); return; }
   }
   if (fr && S.selW === null) setHint("Pick a weapon first, then tap the room to hit.");
+  // a weapon picked (a tap or its number key) and a tap away from the enemy: the aim is cancelled (Michael, 2026-10-04)
+  else if (!fr && (S.selW !== null || S.boardArm)){ S.selW = null; S.boardArm = false; setHint("Aim cancelled."); AUDIO.sfx("click"); buildDeck(); }
 });
 // keyboard: the whole scheme (space, 1-4, A/S/D/F..., Esc, Enter, Tab) lives in src/platform.js
 
@@ -3141,8 +3211,8 @@ function buildDeck(){
   // the DOOR row is also the door control (FTL's close all / open all): a tap seals every door or holds every inner door
   // open. A ship with no doors system (basic doors) gets the row last, so nothing above it moves
   const subs = ["pilot","sensors","doors","weapons"].filter(id => you.sys[id]); if (!you.sys.doors) subs.push("doors");
-  const ssRow = id => id === "doors" ? `<div class="ss s-doors" id="ss_doors" data-s="doors" role="button" aria-pressed="false" aria-label="Doors: tap to seal all or open all"><img src="${sysIcon(id)}" alt=""><span class="lbl" id="sl_doors">${SYS_SHORT[id]}</span><span id="sq_${id}"></span></div>`
-    : `<div class="ss s-${id}" id="ss_${id}" data-s="${id}"><img src="${sysIcon(id)}" alt=""><span class="lbl">${SYS_SHORT[id]}</span><span id="sq_${id}"></span></div>`;
+  const ssRow = id => id === "doors" ? `<div class="ss s-doors" id="ss_doors" data-s="doors" role="button" aria-pressed="false" aria-label="Doors: tap to seal all or open all"><img src="${sysIcon(id)}" alt=""><span class="lbl" id="sl_doors">${SYS_LABEL[id]}</span><span id="sq_${id}"></span></div>`
+    : `<div class="ss s-${id}" id="ss_${id}" data-s="${id}"><img src="${sysIcon(id)}" alt=""><span class="lbl">${SYS_LABEL[id]}</span><span id="sq_${id}"></span></div>`;
   if (subs.length) $("systems").insertAdjacentHTML("beforeend", `<div class="subsys" aria-label="Subsystems">${subs.map(ssRow).join("")}</div>`);
   if ($("ss_doors")) $("ss_doors").addEventListener("click", actDoors);
   $("crew").innerHTML = you.crew.map((c,i) => `<button class="crewCard${S.selC === i ? " sel" : ""}${c.hp <= 0 ? " dead" : ""}" data-c="${i}" ${c.hp <= 0 ? "disabled" : ""}><img src="${portrait(c)}" alt="">${c.station && (you.sys[c.station] || c.station === "pilot") ? `<i class="role" style="background-image:url(${sysIcon(c.station)})" title="${esc(SYS_LABEL[c.station] || c.station)}"></i>` : ""}<span class="cc"><b>${esc(c.name)}</b><small id="cs${i}"></small><span class="hpb"><i id="ch${i}"></i></span></span></button>`).join("");
@@ -3150,13 +3220,14 @@ function buildDeck(){
   const acts = [];
   if (you.sys.cloak) acts.push(`<button class="act" id="aCloak">CLOAK<span class="bar" id="bCloak"></span></button>`);
   if (you.sys.tele) acts.push(`<button class="act" id="aBoard">BOARD<span class="bar" id="bBoard"></span></button>`);
-  acts.push(`<button class="act${S.ventArm ? " armed" : ""}" id="aVent">${S.ventArm ? "DONE VENTING" : "VENT"}<span class="bar" id="bVent"></span></button>`);
+  // Michael, 2026-10-04: "there are no exterior hatches on this ship": only a ship with painted airlocks can vent; doors are tapped on the ship
+  if (hasAirlocks(you)) acts.push(`<button class="act${S.ventArm ? " armed" : ""}" id="aVent">${S.ventArm ? "DONE VENTING" : "VENT"}<span class="bar" id="bVent"></span></button>`);
   acts.push(`<button class="act" id="aJump">JUMP AWAY<span class="bar" id="bJump"></span></button>`);
   $("acts").innerHTML = acts.join("");
   if ($("aCloak")) $("aCloak").addEventListener("click", actCloak);
   if ($("aBoard")) $("aBoard").addEventListener("click", actBoard);
   $("aJump").addEventListener("click", actJump);
-  $("aVent").addEventListener("click", actVent);
+  if ($("aVent")) $("aVent").addEventListener("click", actVent);
   tickDeck();
 }
 // the hint ends where the action buttons begin, however many there are (blind QA 3: with BOARD and VENT showing,
@@ -3182,10 +3253,12 @@ function tickDeck(){
     // the tag says what the gun is aimed at; a dark gun says why it is dark
     const why = powered ? "" : !w.on && !w.want ? (reactorFree(you) < w.power ? "NO REACTOR" : "OFF · TAP") : you.sys.weapons && you.sys.weapons.ion > 0 ? "IONIZED" : you.sys.weapons && you.sys.weapons.dmg > 0 ? "GUNS DAMAGED" : "NO REACTOR";
     const tg = $("wt"+i); if (tg){ const t = why || (aim ? "AIM" : w.target && !(S.foe.cloakT > 0) ? `⌖ ${SYS_SHORT[w.target] || w.target.toUpperCase()}` : ""); setText(tg, t); tg.classList.toggle("why", !!why); }
-    const cn = $("wn"+i); if (cn) setText(cn, powered && !ready && !S.foe.env ? String(Math.max(1, Math.ceil((cd - w.charge)/rate))) : ""); // seconds to ready
+    // the load time (Michael, 2026-10-04: "the time to load weapons isn't present"): seconds to ready while it charges;
+    // a gun that is not charging shows its full load time, dim
+    const cn = $("wn"+i); if (cn){ const full = !powered && !S.foe.env; setText(cn, ready || S.foe.env ? "" : `${Math.max(1, Math.ceil((powered ? cd - w.charge : cd)/(rate || 1)))}s`); cn.classList.toggle("full", full); }
     el.style.setProperty("--p", (w.charge/w.cd).toFixed(3)); el.style.setProperty("--ring", ready ? (aim ? "#ffb33a" : "#7cf29a") : powered ? "#ffc857" : "#3a4c6b");
     const ammo = w.type === "missile" ? ` · ${you.missiles} left` : "";
-    const stat = w.type === "ion" ? `ion ${w.ion || 1}` : w.type === "beam" ? `${w.dmg}×${w.len || 1} rooms` : `${w.shots}×${w.dmg}`;
+    const stat = wepShots(w);
     setText($("ws"+i), !w.on ? `offline · ${stat} · tap to power` : (S.foe.cloakT > 0 ? "no lock: target cloaked" : (w.target ? `→ ${SYS_LABEL[w.target] || w.target.toUpperCase()} · ${stat}${ammo}${w.chain && w.stack ? ` · chain ${w.stack}` : ""}` : `no target · ${stat}${ammo}`)));
   });
   for (const id of ["weapons","pilot","sensors","doors"]){ const el = $("sq_"+id), s = you.sys[id]; if (!el || !s) continue;
@@ -3201,7 +3274,7 @@ function tickDeck(){
   { const ev = evasion(you), pm = manned(you, "pilot"), em = manned(you, "engines");
     if (S._ev != null && ev < S._ev && !S.over && ((S._pm && !pm) || (S._em && !em))){ const why = S._pm && !pm ? "no pilot" : "engines unmanned"; setHint(`Dodge ${S._ev}% → ${ev}%: ${why}`); clearTimeout(tickDeck.dt); tickDeck.dt = setTimeout(() => { if ($("hint").textContent.startsWith("Dodge ")) setHint(""); }, 4000); }
     S._ev = ev; S._pm = pm; S._em = em; }
-  { const dr = $("ss_doors"); if (dr){ const held = doorsAnyHeld(you), t = held ? "OPEN" : SYS_SHORT.doors; dr.classList.toggle("held", held); if (dr.getAttribute("aria-pressed") !== String(held)) dr.setAttribute("aria-pressed", String(held)); setText($("sl_doors"), t); } }
+  { const dr = $("ss_doors"); if (dr){ const held = doorsAnyHeld(you), t = held ? "DOORS OPEN" : SYS_LABEL.doors; dr.classList.toggle("held", held); if (dr.getAttribute("aria-pressed") !== String(held)) dr.setAttribute("aria-pressed", String(held)); setText($("sl_doors"), t); } }
   syncSensBtn();
   hudRes();
   const free = reactorFree(you);
@@ -3214,7 +3287,7 @@ function tickDeck(){
   if (bd){
     const aboard = you.crew.some(q => q.hp > 0 && q.on === "foe"), ready = you.teleCharge >= 1 && eff(you,"tele") > 0;
     const inTele = crewAt(you, "tele", "you").length;
-    bd.firstChild.textContent = S.boardArm ? "PICK A ROOM" : (aboard ? "RECALL" : `BOARD${inTele ? ` (${inTele})` : ""}`);
+    bd.firstChild.textContent = S.boardArm ? "PICK A ROOM" : (aboard ? "RECALL" : S.foe.layers > 0 && !S.foe.env ? "SHIELDS UP" : `BOARD${inTele ? ` (${inTele})` : ""}`);
     bd.disabled = !ready || (!aboard && !inTele);
     bd.classList.toggle("armed", S.boardArm);
     $("bBoard").style.width = `${100*you.teleCharge}%`;
@@ -3233,8 +3306,11 @@ function gunRate(me){ const R_ = MOD.rules, gunners = crewAt(me, "weapons", me.k
 function hudRes(){ const h = $("hudRes"); if (!h || !R) return; const y = R.you;
   const t = `<span class="${y.hull <= y.maxHull*0.3 ? "lo" : ""}">HULL:<b>${y.hull}/${y.maxHull}</b></span><span>SCRAP:<b>${R.scrap}</b></span><span class="${R.fuel <= 2 ? "lo" : ""}">FUEL:<b>${R.fuel}</b></span><span>MISSILES:<b>${y.missiles}</b></span>`;
   if (h.innerHTML !== t) h.innerHTML = t; }
+// a ship can vent only where it has airlocks to space: a painted ship only where its painting has hatches (none on the Kestrel)
+function hasAirlocks(ship){ const kd = typeof kitDef === "function" && kitDef(ship); if (kd && kd.painted) return !!(kd.airlocks && kd.airlocks.length); return true; }
 function actVent(){
   if (!S || S.mode !== "fight" || S.over) return;
+  if (!hasAirlocks(S.you)){ setHint(`The ${S.you.name} has no airlocks to space. Tap a door on the ship to open or seal it.`); AUDIO.sfx("click"); return; }
   S.ventArm = !S.ventArm; S.selW = null; S.selC = null; S.boardArm = false; AUDIO.sfx("click");
   setHint(S.ventArm ? "Tap your rooms to open their airlocks. Vacuum kills fire and boarders, and your crew too." : (Object.values(S.you.vent || {}).some(Boolean) ? "Airlocks stay open. Tap VENT again to close them." : ""));
   buildDeck();
@@ -3286,6 +3362,7 @@ function actBoard(){
   const aboard = you.crew.filter(q => q.hp > 0 && q.on === "foe");
   if (aboard.length){ for (const c of aboard){ c.on = "you"; c.dest = c.room = "tele"; c.gx = null; } you.teleCharge = 0; AUDIO.sfx("teleport"); setHint("Boarders recalled."); buildDeck(); return; }
   if (!crewAt(you, "tele", "you").length){ setHint("Send crew to the TELEPORT room first."); return; }
+  if (S.foe.layers > 0){ setHint(`The ${S.foe.name}'s shields are up: nobody can beam through. Knock them down, then BOARD.`); AUDIO.sfx("click"); return; }
   S.boardArm = !S.boardArm; S.selW = null; S.selC = null;
   setHint(S.boardArm ? "Tap an enemy room to beam your boarders in." : ""); buildDeck();
 }
@@ -3293,6 +3370,7 @@ function doBoard(rid){
   const you = S.you, party = crewAt(you, "tele", "you");
   S.boardArm = false;
   if (!party.length || you.teleCharge < 1){ setHint(!party.length ? "Send crew to the TELEPORT room first." : "The teleporter is still charging."); tickDeck(); return; }
+  if (S.foe.layers > 0){ setHint(`The ${S.foe.name}'s shields came back up: nobody can beam through. Knock them down, then BOARD.`); tickDeck(); return; }
   for (const c of party){ c.on = "foe"; c.dest = c.room = rid; c.gx = null; }
   you.teleCharge = 0; AUDIO.sfx("teleport"); float(S.foe, rid, "BOARDED", "#5fd4e8");
   setHint(`${party.map(c => c.name).join(" and ")} aboard the ${S.foe.name}. Recall them before it blows.`); buildDeck();
@@ -4614,6 +4692,20 @@ function crewFoot(spr){ let f = FOOT.get(spr); if (f) return f;
   for (let y = h - 1; y >= 0 && bot < 0; y--) for (let x = 0; x < w; x++) if (d[(y*w + x)*4 + 3] > 120){ bot = y; break; }
   let x0 = w, x1 = -1; for (let y = Math.max(0, bot - Math.round(h*0.08)); y <= bot; y++) for (let x = 0; x < w; x++) if (d[(y*w + x)*4 + 3] > 120){ if (x < x0) x0 = x; if (x > x1) x1 = x; }
   f = x1 < 0 ? {c: 0.5, w: 0.2} : {c: (x0 + x1 + 1)/2/w, w: (x1 - x0 + 1)/w}; FOOT.set(spr, f); return f; }
+// One size whatever the pose (Michael, 2026-10-04: "growing and shrinking"): the standing frames of a skin were drawn at
+// different heights in their sheets (Tesh: 130 px standing, 149 walking), so a standing frame is scaled to the height of
+// the skin's own walk; kneeling, lying, hurt and the painted station poses keep their own size.
+const FIG_H = new WeakMap();
+function figH(spr){ let h = FIG_H.get(spr); if (h != null) return h; h = 0;
+  try { const d = spr.getContext("2d").getImageData(0, 0, spr.width, spr.height).data; let y0 = -1, y1 = -1;
+    for (let y = 0; y < spr.height && y0 < 0; y++) for (let x = 0; x < spr.width; x++) if (d[(y*spr.width + x)*4 + 3] > 40){ y0 = y; break; }
+    for (let y = spr.height - 1; y >= 0 && y1 < 0; y--) for (let x = 0; x < spr.width; x++) if (d[(y*spr.width + x)*4 + 3] > 40){ y1 = y; break; }
+    h = y0 >= 0 ? y1 - y0 + 1 : 0; } catch {}
+  FIG_H.set(spr, h); return h; }
+function frameFit(c, spr, frame){
+  if (!/^(idle|op1s?|op2|walk[du]?\d|fight2?)$/.test(frame) || crewPainted(c, frame)) return 1;
+  const ref = crewHas(c, "walk1") ? crewSprite(c, "walk1") : null, hr = ref ? figH(ref) : 0, hf = figH(spr);
+  return hr > 0 && hf > 0 ? clamp(hr/hf, 0.8, 1.25) : 1; }
 function drawCrew(ship, g){
   const t = performance.now()/1000, now = performance.now();
   const live = S && !S.paused && !S.over, sh = ship.cut && ship.cut.kit && SHAPED[ship.cut.art], ca0 = sh && cutArt(ship);
@@ -4661,7 +4753,7 @@ function drawCrew(ship, g){
     else if (st){ if (st.pose === "stand" && !asPainted){ ox += Math.cos(st.face*Math.PI/180)*cs*0.04; } } // working: leaning in
     else if (!dead && c.act === "man" && sh){ const kt = sh.kit[c.room]; if (kt && kt.gc){ const dx = (kt.gc[0] - c.gx)*(ship.you ? 1 : -1); if (Math.abs(dx) > 0.2){ ox += Math.sign(dx)*cs*0.07; flip = dx < 0; } oy += Math.sin(t*9 + c.seed)*cs*0.006; } }
     else if (!dead && c.act === "idle" && Math.sin(t*0.7 + (c.seed % 13)) > 0.93) flip = !flip; // a glance about
-    const breath = !dead && (st || c.act === "idle" || c.act === "man") ? 1 + 0.012*Math.sin(t*2.3 + seed*6.3) : 1; // the operating loop: they breathe, they don't freeze
+    const breath = 1; // (the breathing scale is off: Michael, 2026-10-04, "they are growing and shrinking pulsing and it's weird")
     // walking up or down the screen: the toward-camera / away frames (with some give, so a diagonal doesn't flicker between views)
     if (c.act === "walk"){ const vy = Math.sin(c.face || 0), vx = Math.abs(Math.cos(c.face || 0)); c._vert = c._vert ? (Math.abs(vy) > vx*0.8 ? (vy > 0 ? "d" : "u") : "") : (Math.abs(vy) > vx*1.25 ? (vy > 0 ? "d" : "u") : ""); }
     const wv = v2 && c._vert && crewHas(c, "walk" + c._vert + "1") ? "walk" + c._vert : "walk";
@@ -4707,6 +4799,7 @@ function drawCrew(ship, g){
       // out of sight below them, facing the way the seat faces (the raider's pilot, as in art-approved/08)
       if (seatedNoFrame){ X.beginPath(); X.rect(p.x - Z, feet - Z*1.2, Z*2, Z*1.2); X.clip(); X.translate(0, Z*0.38); }
       X.translate(p.x + (still ? 0 : ox), feet + (still ? 0 : oy)); if (dflip) X.scale(-1, 1); X.scale(1, breath);
+      const kf = still ? 1 : frameFit(c, spr0, frame); if (kf !== 1) X.scale(kf, kf); // one size in every standing pose
       put(spr, dflip, ga);
       const xf = c._xf, xk = xf ? (now - xf.at)/160 : 1;
       if (xf && xk < 1){ X.save(); if (xf.flip !== dflip) X.scale(-1, 1); put(xf.spr, xf.flip, ga*(1 - xk)); X.restore(); } else c._xf = null;
@@ -6341,7 +6434,7 @@ function chooseShip(epicId){
         <div><b>${d.reactor}</b><span>REACTOR</span></div>
         <div><b>${(d.crew || []).length}</b><span>CREW</span></div>
       </div>
-      <div class="hgGuns">${d.weapons.map(id => { const w = MOD.weapons[id]; return w ? `<span class="t-${w.type}"><img src="${wepArt(id)}" alt=""><b>${esc(w.name)}</b><small>${TYPE[w.type] || w.type.toUpperCase()} · ${w.type === "beam" ? `${w.dmg}×${w.len || 1} rooms` : w.type === "ion" ? `ion ${w.ion || 1}` : `${w.shots}×${w.dmg}`} · ${w.power} pwr</small></span>` : ""; }).join("")}${extras(d).map(x => `<span class="hgSys"><b>${x}</b><small>SYSTEM</small></span>`).join("")}</div>
+      <div class="hgGuns">${d.weapons.map(id => { const w = MOD.weapons[id]; return w ? `<span class="t-${w.type}"><img src="${wepArt(id)}" alt=""><b>${esc(w.name)}</b><small>${TYPE[w.type] || w.type.toUpperCase()} · ${wepShots(w)} · needs ${w.power} power</small></span>` : ""; }).join("")}${extras(d).map(x => `<span class="hgSys"><b>${x}</b><small>SYSTEM</small></span>`).join("")}</div>
       <div class="hgCrew">${ship.crew.map(c => `<span><img src="${portrait(c)}" alt=""><b>${esc(c.name)}</b><small>${esc(SP(c).name)}</small></span>`).join("")}</div>
       <div class="btnRow hgBtns"><button class="btn" id="back">BACK</button><button class="go" id="hgGo">LAUNCH ${esc(d.name)}</button></div>
     </div></div>`);
@@ -7039,11 +7132,10 @@ function cueSet(v){
 function cuePlace(v){
   const el = $("cue"), fr = stageRect($("field")); CUE.at = performance.now();
   if (v.map || S.mode !== "fight"){ const x1 = mapView().x1; el.style.left = "12px"; el.style.width = Math.max(160, x1 - 24) + "px"; el.style.top = ""; el.style.bottom = "8px"; return; }
-  const cr = stageRect($("crew")), wb = stageRect($("wepBox")), sb = stageRect($("sysBox"));
-  const L = [sb.left + sb.width + 6, cr.left - 8], Rr = [cr.left + cr.width + 8, wb.left - 8];
-  let s = (v.side === "L" ? L : Rr); if (s[1] - s[0] < 150) s = s === L ? Rr : L;
+  // FTL's layout (2026-10-04): the free strip is along the bottom, between the systems strip and the weapons, under the ships
+  const wb = stageRect($("wepBox")), sb = stageRect($("sysBox")), s = [sb.left + sb.width + 10, wb.left - 10];
   el.style.left = (s[0] - fr.left) + "px"; el.style.width = Math.max(120, s[1] - s[0]) + "px"; el.style.bottom = "";
-  el.style.top = Math.max(0, cr.top - fr.top + cr.height/2 - (el.offsetHeight || 30)/2) + "px";
+  el.style.top = Math.max(0, sb.top - fr.top + sb.height - (el.offsetHeight || 30) - 4) + "px";
 }
 // the glow on a room (theirs to aim at, yours to send crew to): light around the room, drawn with the shots
 function cueDraw(){
@@ -7751,9 +7843,9 @@ function subTip(id){
 }
 function wepTip(i){
   const w = S.you.weapons[i]; if (!w) return "";
-  const what = w.type === "beam" ? `beam, ${w.dmg} damage a room across ${w.len || 1} room${(w.len || 1) > 1 ? "s" : ""}` : w.type === "ion" ? `ion ${w.ion || 1}: locks shields or a system` : `${w.shots} shot${w.shots > 1 ? "s" : ""} × ${w.dmg} damage${w.type === "missile" ? ", passes shields" : ""}`;
+  const what = `${wepShots(w)}${w.type === "missile" ? ", passes shields" : ""}`;
   const st = !w.on ? "off" : w.charge >= w.cd ? "ready" : `charging ${pct(100*w.charge/w.cd)}`;
-  return `<b>${esc(w.name)}</b><span>${w.type.toUpperCase()} · ${what}</span><span>${w.power} power · ${w.cd}s · ${st}${w.target ? ` · aimed at ${SYS_LABEL[w.target] || w.target}` : ""}</span>`
+  return `<b>${esc(w.name)}</b><span>${w.type.toUpperCase()} · ${what}</span><span>needs ${w.power} power · ${w.cd}s to load · ${st}${w.target ? ` · aimed at ${SYS_LABEL[w.target] || w.target}` : ""}</span>`
     + `<i>${i < 4 ? `key ${i + 1} · ` : ""}click, then an enemy room · right-click ${w.on ? "powers it down" : "—"}</i>`;
 }
 function crewTip(i){
@@ -7920,12 +8012,13 @@ const AUDIO = (() => {
     const d = b.getChannelData(0), lim = Math.min(d.length, Math.floor(b.sampleRate*0.08)); for (let i = 0; i < lim; i++) if (Math.abs(d[i]) > 0.003) return i/b.sampleRate; return 0; }
   // four at a time (a phone decodes these on its main thread), weapons and interface first
   async function loadSfx(c = ctx){
+    if (navigator.webdriver) return; // a muted test browser fetches no sound files (a reload mid-download logged load errors)
     const q = SFX.slice(), run = async () => { while (q.length){ const n = q.shift(); try { const b = await decode(c, `sfx/${n}.mp3`); buf[n] = {b, off: lead(b)}; } catch {} } };
     await Promise.all([run(), run(), run(), run()]);
   }
   /* ---------------- music ---------------- */
   async function loadMusic(){
-    if (!ctx || musicState !== "none") return; musicState = "loading";
+    if (!ctx || musicState !== "none" || navigator.webdriver) return; musicState = "loading";
     try {
       const [ex, ba] = await Promise.all(MUSIC.stems.map(k => decode(ctx, `music/${k}.mp3`)));
       buf.explore = {b: ex}; buf.battle = {b: ba};
