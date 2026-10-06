@@ -1441,6 +1441,7 @@ function update(dt){
   if (S.hitstop > 0){ S.hitstop -= dt; return; }
   if (S.slow > 0){ S.slow -= dt; dt *= 0.25; }
   const R_ = MOD.rules; S.t += dt;
+  if (!S.ft && !S.over && (S.saveT = (S.saveT ?? 2) - dt) <= 0){ S.saveT = 2; if (typeof saveFight === "function") saveFight(); } // Continue mid-fight (src/p4.js)
   for (const [me, them] of [[S.you,S.foe],[S.foe,S.you]]){
     let cum = 0; const effW = eff(me,"weapons"); const jammed = them.cloakT > 0;
     // only crew who can work the console count (an ordinary Skitterer cannot: canMan); FTL C2: x0.90 / 0.85 / 0.80 of the time
@@ -6271,7 +6272,7 @@ async function gameOver(won, cause){
     ? `${escaped ? "The drive catches and the ship falls out the far side into ordinary dark." : "It's over."} ${you.crew.length ? `${you.crew.map(c => c.name).join(", ")} sit on the bridge floor and nobody says anything for a long time. Then somebody laughs.` : "Nobody is left aboard to see it."} ${R.lost.length ? `${R.lost.join(", ")} should have been here for this.` : ""}`
     : `The ${you.name} went down in sector ${R.sector}. It was ${cause}, in the end.${S && S.endCause === "crew" ? " No one was left alive to fly her." : ""} ${R.kills} ship${R.kills === 1 ? "" : "s"} beaten on the way. ${R.lost.length ? `${R.lost.join(", ")} went first.` : ""}`;
   cap.epitaph = won ? "" : (you.crew[0] ? `${you.crew[0].name} here. If you find this, don't take the turn we took.` : "No one left to record.");
-  lsSet("ftlr.run", null); saveUniverse();
+  lsSet("ftlr.run", null); lsSet("ftlr.fight", null); saveUniverse();
   AUDIO.setBattle(false); AUDIO.sting(won ? "win" : "loss");
   S = {mode:"map", parts:[], fx:[], floats:[], rings:[], zaps:[], warp:0}; setMode("over");
   $("banner").classList.remove("on");
@@ -6292,12 +6293,42 @@ async function gameOver(won, cause){
 
 /* ---------------- memory ---------------- */
 function saveRun(){ if (!R) return; if (R._pickApplied && R.pendingArrive && R.pendingArrive.pick) return; // an answered event saves only its before-state + answer: a replay lands it once
+  R.saveN = (R.saveN || 0) + 1; // a fight snapshot (below) is good only until the run saves again
   try { const r = JSON.parse(JSON.stringify(R, (k, v) => k[0] === "_" ? undefined : v)); r.curEvent = null; r.after = null; lsSet("ftlr.run", r); } catch {} } // "_" keys are canvases and caches
+// A fight in progress (PLAYABLE v1 point 6: "Continue brings back exactly where you were"): every 2 s of fight time
+// and whenever the page is hidden, the whole run plus the enemy ship and the fight's clock go to "ftlr.fight".
+// Continue picks it up, paused, while the run has not saved since (saveN); shots in flight are not kept.
+// The first fight (S.ft) is a script and simply replays.
+const FIGHT_KEEP = ["t", "lastHullT", "foeDmgMult", "boss", "intro", "saidLow", "saidShields", "saidAir", "saidLock", "focus", "lastBarkT"];
+function saveFight(){ if (!R || !S || S.mode !== "fight" || S.over || S.ft || !S.foe || S.you !== R.you) return;
+  try { const drop = (k, v) => k[0] === "_" ? undefined : v, r = JSON.parse(JSON.stringify(R, drop)), foe = JSON.parse(JSON.stringify(S.foe, drop));
+    r.curEvent = null; r.after = null; if (S.offer) foe.offered = false; // an open surrender offer comes back as soon as the fight runs
+    const s = {}; for (const k of FIGHT_KEEP) if (S[k] !== undefined) s[k] = S[k];
+    lsSet("ftlr.fight", {v: 1, run: R.id, saveN: R.saveN || 0, r, foe, s}); } catch {} }
+function loadFight(saved){ const f = lsGet("ftlr.fight");
+  if (!f || f.v !== 1 || !saved || f.run !== saved.id || (f.saveN || 0) !== (saved.saveN || 0) || !f.r || !f.foe || !runLooksSound(f.r)) return null;
+  return f; }
+function resumeFight(f){
+  R = f.r; R.jumping = false; R.after = null; const foe = f.foe;
+  returnToMap(true); // the map is set up under the fight, as on any Continue
+  S = {mode:"fight", focus:"you", paused:true, over:null, selW:null, selC:null, boardArm:false, you:R.you, foe, fx:[], parts:[], floats:[], zaps:[], rings:[], bubbles:[],
+       shake:0, t:0, aiT:0, lastHullT:0, offer:null, hitstop:0, slow:0, redFlash:0, foeDmgMult: 1 + 0.06*(R.sector-1), boss:false, intro:"", saidLow:false, saidShields:0, ...f.s};
+  for (const c of [...R.you.crew, ...foe.crew]) if (c.hp > 0 && S[c.on]){ if (!room(S[c.on], c.room)) c.room = c.dest = S[c.on].layout[0].id; const sh = S[c.on], nav = shipNav(sh), at = Number.isFinite(c.gx) && Number.isFinite(c.gy) ? navRoomAt(nav, c.gx, c.gy) : null;
+    if (at && nav.rooms[at]){ c._navKey = nav.key; c._navRoom = at; c._navX = null; c._path = null; c._pt = null; } else crewPlace(sh, c, nav); } // each stands where they stood
+  setMode("fight");
+  $("sector").textContent = `SECTOR ${R.sector} · vs ${foe.name}`;
+  buildDeck();
+  setHint(`Back where you left off: the ${foe.name}, paused. Tap Resume.`);
+  if (S.boss) showBanner(foe.name, foe.env ? "survive it" : "the flagship");
+  AUDIO.setBattle(true, !!S.boss);
+  layout(); tickDeck();
+}
 // the fight tips (cues) and the first turn: src/p4c.js
 
 // phones: leaving the page pauses a fight and saves a run that's sitting on the map
 function awayFromPage(){
   if (S && S.mode === "fight" && !S.paused && !S.over){ S.paused = true; setHint("Paused while you were away. Tap Resume to carry on."); tickDeck(); }
+  if (S && S.mode === "fight" && !S.over) saveFight(); // the fight as it stands: closing the app here, Continue brings it back
   if (R && S && S.mode === "map" && !R.jumping) saveRun();
 }
 document.addEventListener("visibilitychange", () => { if (document.hidden) awayFromPage(); });
@@ -6373,7 +6404,9 @@ function showTitle(){
   $("opLog").addEventListener("click", () => { AUDIO.unlock(); AUDIO.sfx("click"); showLog(); });
   $("opKeys").addEventListener("click", () => { AUDIO.unlock(); AUDIO.sfx("click"); showKeys(); }); syncKeysBtns();
   $("opSnd").addEventListener("click", () => { $("sndBtn").click(); $("opSnd").textContent = $("sndBtn").textContent; });
-  if (saved) $("opCont").addEventListener("click", () => { AUDIO.unlock(); AUDIO.sfx("click"); R = saved; R.jumping = false;
+  if (saved) $("opCont").addEventListener("click", () => { AUDIO.unlock(); AUDIO.sfx("click");
+    const fight = loadFight(saved); if (fight){ try { return resumeFight(fight); } catch (e) { console.warn("resume fight failed", e); lsSet("ftlr.fight", null); } } // mid-fight: the fight as it was
+    R = saved; R.jumping = false;
     const p = R.pendingArrive, n = p && R.map.nodes[p.id];
     returnToMap(!!n); showBanner(`SECTOR ${R.sector}`, R.arc ? R.arc.sectors[R.sector-1].name : "");
     if (n){ n.visited = !p.first; setTimeout(() => arrive(n), 900); } // pick up the encounter at the beacon you jumped to
