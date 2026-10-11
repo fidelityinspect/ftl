@@ -626,6 +626,17 @@ body:not(.big) .stLine{font-size:clamp(14px,2.05vw,17px)}
 .ydBuilding b{font:700 10px var(--display);color:#f1f7fb}
 .ydBuilding small{font:500 6.5px/1.3 var(--mono);color:#8fa3b8}
 .ydCrewP.many{gap:4px}
+/* the signature threat strip (src/threats.js) */
+.threat{position:absolute;left:50%;top:44px;transform:translateX(-50%);z-index:6;display:grid;grid-template-columns:1fr auto;column-gap:12px;row-gap:3px;align-items:center;min-width:270px;max-width:62%;padding:7px 12px 9px;box-sizing:border-box;border:1.5px solid #ff6b4a;border-radius:7px;background:rgba(40,10,6,.88);box-shadow:0 0 14px rgba(255,107,74,.45);pointer-events:none;overflow:hidden}
+.threat[hidden]{display:none}
+.threat b{font:700 13px var(--display);letter-spacing:.1em;color:#ffd2c4}
+.threat .tn{font:700 18px var(--display);color:#ff6b4a;font-variant-numeric:tabular-nums}
+.threat small{grid-column:1/-1;font:500 10px var(--mono);color:#ffb39f;letter-spacing:.03em}
+.threat i{position:absolute;left:0;bottom:0;height:3px;background:#ff6b4a}
+.threat.hot{animation:threatPulse .5s infinite alternate}
+@keyframes threatPulse{to{box-shadow:0 0 26px rgba(255,107,74,.9);border-color:#ffd2c4}}
+body:not([data-mode=fight]) .threat{display:none}
+body.ftlf .threat{top:58px}
 /* the menu (src/menu.js) */
 .menuSub{margin:-4px 0 8px;font:500 11px var(--mono);color:#8fa3b8;letter-spacing:.04em}
 .menuList{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:7px}
@@ -1756,6 +1767,7 @@ function startFight(foe, opts = {}){
   S = {mode:"fight", focus:"you", paused:true, over:null, selW:null, selC:null, boardArm:false, you:R.you, foe, fx:[], parts:[], floats:[], zaps:[], rings:[], bubbles:[],
        shake:0, t:0, aiT:0, lastHullT:0, offer:null, hitstop:0, slow:0, redFlash:0, foeDmgMult: 1 + 0.06*(R.sector-1), boss: !!opts.boss, intro: opts.intro || "", saidLow:false, saidShields:0};
   prepShip(R.you); prepShip(foe);
+  if (!foe.sig) threatInit(foe); // the enemy's signature threat (src/threats.js); a resumed fight keeps its own
   for (const c of [...R.you.crew, ...foe.crew]) if (c.hp > 0){ c.gx = null; crewPlace(S[c.on], c, shipNav(S[c.on])); } // crew stand at their posts while the fight opens paused
   for (const d of R.pendingSysDmg || []){ const s = R.you.sys[d.system]; if (s) s.dmg = Math.min(s.level, s.dmg + d.amount); }
   R.pendingSysDmg = [];
@@ -1786,7 +1798,7 @@ function update(dt){
     // only crew who can work the console count (an ordinary Skitterer cannot: canMan); FTL C2: x0.90 / 0.85 / 0.80 of the time
     const gunners = crewAt(me,"weapons",me.key).filter(canMan), mt = R_.weaponsMannedTime;
     const manSpeed = !gunners.length ? 1 : Array.isArray(mt) ? 1/byLevel(mt, bestAt(me,"weapons","weapons")) : 1 + R_.weaponsMannedSpeed + 0.05*bestAt(me,"weapons","weapons");
-    const speed = (manSpeed + (lumenIn(me,"weapons") ? 0.15 : 0)) * (me.you ? 1 : 1 + 0.08*(R.sector - 1));
+    const speed = (manSpeed + (lumenIn(me,"weapons") ? 0.15 : 0)) * (me.you ? 1 : 1 + 0.03*(R.sector - 1)); // was 0.08 a sector: eased 2026-10-11 to make room for the signature threats (src/threats.js)
     for (const w of me.weapons){
       if (w.on) cum += w.power;
       const powered = w.on && cum <= effW;
@@ -1838,6 +1850,7 @@ function update(dt){
   if (S.foe.env) envTick(dt);
   if (S.foe.env && !S.over && S.you.ftl >= 1 && S.you.hull > 0 && typeof actJump === "function"){ actJump(); return; } // the drive catches: out of the hazard
   S.aiT -= dt; if (S.aiT <= 0 && !S.foe.env){ S.aiT = 0.4; enemyAI(0.4); }
+  if (!S.over && !S.foe.env) threatTick(dt); // the signature threat's countdown (src/threats.js)
   const crew = allCrew();
   navDoorsTick(S.you, dt); navDoorsTick(S.foe, dt); // doors open ahead of crew and shut behind them
   for (const c of crew) crewTick(c, dt);
@@ -2086,7 +2099,8 @@ function enemyAI(dt = 0.4){
     const onYou = f.crew.filter(c => c.hp > 0 && c.on === "you").length;
     const avail = home.filter(c => c.station !== "pilot" && !c._heal).sort((a,b) => SP(b).combat*b.hp - SP(a).combat*a.hp);
     const rid = boardTarget(you); // AI1: where it hurts you most, not a random room
-    if (!onYou && avail.length >= party && rid){
+    if (!onYou && avail.length >= party && rid && f.sig && f.sig.kind === "board") threatBoardStart(f, you, rid, party); // called ahead, with a countdown (src/threats.js)
+    else if (!onYou && avail.length >= party && rid){
       for (const c of avail.slice(0, party)){ c.on = "you"; c.dest = c.room = rid; c.gx = null; }
       f.teleCharge = 0; float(you, rid, "BOARDERS", "#ff6b4a"); AUDIO.sfx("teleport"); setHint(`Boarders in your ${SYS_LABEL[rid] || rid}! Send crew to fight them.`);
       barkAny("boarders", c => c.on === "you");
@@ -8204,6 +8218,102 @@ function lhStoreItems(r){
     {kind: "mat", mat: "pipe", amount: 2, price: 14, label: "2 pipework", detail: "material for the plan"}];
   if (r() < 0.35) items.push({kind: "mat", mat: "core", amount: 1, price: 60, label: "Reactor core", detail: "the heart of the fusion reactor section"});
   return items;
+}
+
+/* ============================================================
+   SIGNATURE THREATS (Michael, 2026-10-11: "It's just not that fun" — the fights feel samey). Every enemy brings one
+   threat you can see coming and can answer (PILLARS 16: every risk can be read and beaten). A fight stops being a
+   damage race and becomes a problem: spot it, answer it in time.
+     MISSILE LOCK  a missile salvo charges at one of your systems, with a countdown. Shields don't stop it (2 hull and
+                   a bar off that system; a boss 3). Answer: hit their WEAPONS room to break the lock, keep hitting
+                   them (every point of hull you take off pushes the lock back), cloak, or dodge.
+     BOARDERS      a ship with a teleporter announces its boarding party, the room it's aiming for and a countdown.
+                   Answer: get a shield layer up before it ends (no one beams through shields), seal or vent the room,
+                   or meet them there with crew.
+   Paused, the countdown waits with you. The first fight (S.ft) is a script and keeps its own beats.
+   ============================================================ */
+const THREAT = {warn: 9, firstAt: 14, gap: [30, 38]}; // first warning ~14 s in, then one every 30-38 s (balance sim, 2026-10-11)
+function threatInit(foe){
+  if (!foe || foe.env) return;
+  const tier = foe.tier || 0, r = rng32(((foe.seed || 7) ^ 0x7a11) >>> 0);
+  if (foe.sys.tele) foe.sig = {kind: "board", warn: 0};
+  else if (foe.sys.drones) foe.sig = {kind: "drones"}; // a drone ship's drones are its threat (balance sim: a lock on top took the HIVE from 80% to 43%)
+  else foe.sig = {kind: "lock", t: -(THREAT.firstAt - THREAT.warn) - r()*4, dmg: 2 + (foe.boss ? 1 : 0), target: null, wDmg: 0, hull: foe.hull};
+}
+// the system the salvo is aimed at: the one that hurts you most to lose
+function threatTarget(you){
+  for (const id of ["shields", "weapons", "engines", "oxygen", "pilot"]) if (you.sys[id] && room(you, id)) return id;
+  return you.layout[0].id;
+}
+function threatTick(dt){
+  const f = S.foe, you = S.you, g = f && f.sig;
+  if (!g || S.over || S.ft || f.env || f.hull <= 0){ threatShow(null); return; }
+  if (g.kind === "lock"){
+    const wdmg = f.sys.weapons ? f.sys.weapons.dmg : 0;
+    if (eff(f, "weapons") <= 0){ if (g.t > 0) threatBreak(g, "WEAPONS DOWN"); threatShow(null); g.wDmg = wdmg; return; } // no guns, no salvo
+    if (g.t > 0 && wdmg > g.wDmg) threatBreak(g, "LOCK BROKEN"); // you hit their weapons room in time
+    else if (g.t > 0 && f.hull < g.hull) g.t -= (g.hull - f.hull)*0.75; // every hit you land shakes their aim: the lock slips back
+    g.wDmg = wdmg; g.hull = f.hull;
+    g.t += dt;
+    if (g.t > 0 && !g.target){ g.target = threatTarget(you); AUDIO.sfx("alarm"); float(you, g.target, "LOCKED ON", "#ff6b4a"); setHint(""); }
+    if (g.t >= THREAT.warn) threatFire(f, you, g);
+    threatShow(g.t > 0 ? {kind: "lock", left: THREAT.warn - g.t, frac: g.t/THREAT.warn, target: g.target, dodge: evasion(you)} : null);
+    return;
+  }
+  if (g.kind === "board" && g.warn > 0){
+    g.warn -= dt;
+    if (you.layers > 0){ g.warn = 0; g.cool = 6; float(you, g.rid, "BLOCKED", "#5fd4e8"); setHint("Your shields are up: their boarders can't beam through."); threatShow(null); return; }
+    if (g.warn <= 0) threatBoard(f, you, g);
+    threatShow(g.warn > 0 ? {kind: "board", left: g.warn, frac: 1 - g.warn/THREAT.warn, target: g.rid, n: g.n} : null);
+    return;
+  }
+  if (g.cool > 0) g.cool -= dt;
+  threatShow(null);
+}
+function threatBreak(g, why){
+  g.t = -(THREAT.gap[0] - THREAT.warn) - Math.random()*(THREAT.gap[1] - THREAT.gap[0]);
+  if (g.target) float(S.foe, "weapons", why, "#5fd4e8");
+  g.target = null; AUDIO.sfx("click"); setHint(why === "LOCK BROKEN" ? "Lock broken. They have to start over." : "");
+}
+function threatFire(f, you, g){
+  const rid = room(you, g.target) ? g.target : threatTarget(you);
+  g.t = -(THREAT.gap[0] - THREAT.warn) - Math.random()*(THREAT.gap[1] - THREAT.gap[0]); g.target = null;
+  AUDIO.sfx("missile");
+  if (you.cloakT > 0 || Math.random()*100 < evasion(you)){ float(you, rid, "EVADED", "#7cf29a"); setHint("Salvo dodged."); return; }
+  // the salvo: its damage to the hull, but only one bar to the system it was aimed at
+  const s = you.sys[rid], before = s ? s.dmg : 0;
+  hitRoom(you, rid, Math.round(g.dmg*(S.foeDmgMult || 1)), {type: "missile", name: "salvo"});
+  if (s) s.dmg = Math.min(s.level, before + 1);
+  setHint("");
+}
+// a teleporter ship calls its boarding party ahead (enemyAI starts it): the room and the countdown show
+function threatBoardStart(f, you, rid, party){
+  const g = f.sig; if (!g || g.kind !== "board" || g.warn > 0 || g.cool > 0) return false;
+  g.warn = THREAT.warn; g.rid = rid; g.n = party; AUDIO.sfx("alarm");
+  float(you, rid, "BOARDERS INCOMING", "#ff6b4a"); setHint(""); // the strip says it all
+  return true;
+}
+function threatBoard(f, you, g){
+  g.warn = 0;
+  const home = f.crew.filter(c => c.hp > 0 && c.on === "foe");
+  const avail = home.filter(c => c.station !== "pilot" && !c._heal).sort((a, b) => SP(b).combat*b.hp - SP(a).combat*a.hp);
+  if (avail.length < g.n || !room(you, g.rid) || eff(f, "tele") <= 0){ g.cool = 4; return; }
+  for (const c of avail.slice(0, g.n)){ c.on = "you"; c.dest = c.room = g.rid; c.gx = null; }
+  f.teleCharge = 0; float(you, g.rid, "BOARDERS", "#ff6b4a"); AUDIO.sfx("teleport"); setHint(`Boarders in your ${SYS_LABEL[g.rid] || g.rid}! Send crew to fight them.`);
+  barkAny("boarders", c => c.on === "you");
+}
+// the warning strip at the top of the field: what's coming, where, how long, and what answers it
+function threatShow(v){
+  let el = $("threat");
+  if (!v){ if (el && !el.hidden) el.hidden = true; return; }
+  if (!el){ el = document.createElement("div"); el.id = "threat"; el.className = "threat"; el.setAttribute("role", "alert"); $("field").append(el); }
+  const where = (SYS_LABEL[v.target] || String(v.target || "").toUpperCase());
+  const head = v.kind === "lock" ? `MISSILE LOCK · ${where}` : `BOARDERS · ${where}`;
+  const tip = v.kind === "lock" ? `Hit their WEAPONS to break it · dodge ${Math.round(v.dodge)}%` : "Raise SHIELDS to block it · or seal and fight";
+  const html = `<b>${esc(head)}</b><span class="tn">${Math.max(0, Math.ceil(v.left))}s</span><i style="width:${Math.round(100*clamp(v.frac, 0, 1))}%"></i><small>${esc(tip)}</small>`;
+  if (el.innerHTML !== html) el.innerHTML = html;
+  el.classList.toggle("hot", v.left <= 3);
+  if (el.hidden) el.hidden = false;
 }
 
 /* ============================================================
