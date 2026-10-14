@@ -2384,6 +2384,9 @@ function drawNebula(){
 }
 
 function resize(){
+  // a pane that has not been laid out yet (an embedded browser tab reports 1x1 until it is shown) is not a screen size:
+  // keep the last layout and look again shortly, instead of shrinking the game to nothing
+  if (innerWidth < 120 || innerHeight < 120){ clearTimeout(resize._t); resize._t = setTimeout(resize, 250); return; }
   // the game is landscape only: held upright, the whole stage turns (CSS body.rot) and keeps its landscape size
   // (a desktop window is never turned, and is fitted rather than filled: see DESK above)
   const rot = !DESK && innerHeight > innerWidth, de = document.documentElement.style, lw = rot ? innerHeight : innerWidth, wh = rot ? innerWidth : innerHeight;
