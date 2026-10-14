@@ -490,31 +490,6 @@
    "source": "Michael's Gemini art (assets-candidates/), cut by tools/ship_kit.py, 2026-10-04: the scout's deck as a mask (where rooms may run), same size and crop as hull_scout.png"
   },
   {
-   "group": "ships",
-   "id": "hull_kestrel",
-   "file": "hull_kestrel.png",
-   "width": 1311,
-   "height": 697,
-   "at": "2026-10-04",
-   "source": "Michael's Gemini chat (the Kestrel's interior painted with its crew, then emptied to plinths), cut by tools/ship_kit.py painted"
-  },
-  {
-   "group": "ships",
-   "id": "hull_kestrel_hd",
-   "file": "hull_kestrel_hd.png",
-   "width": 2620,
-   "height": 1394,
-   "at": "2026-10-04",
-   "source": "the same painted Kestrel at the painting's full size, same crop (tools/ship_kit.py painted-hd); loaded only on an iPad or a desktop so the ship stays sharp drawn big"
-  },
-  {
-   "group": "kit",
-   "id": "hull_kestrel_rooms",
-   "index": "hull_kestrel.json",
-   "at": "2026-10-04",
-   "source": "the painted Kestrel's room outlines, walk areas, machine plinths and crew stations (tools/ship_kit.py)"
-  },
-  {
    "group": "crew",
    "id": "crew_v2",
    "file": "crew_v2.png",
@@ -540,28 +515,203 @@
   },
   {
    "group": "ships",
+   "id": "hull_kestrel",
+   "file": "hull_kestrel.png",
+   "width": 1372,
+   "height": 720,
+   "at": "2026-10-07",
+   "source": "the A+B1 look (art-approved/13): Gemini painted the kestrel on its floor plan (tools/ship_plan.py plan), half size"
+  },
+  {
+   "group": "ships",
+   "id": "hull_kestrel_hd",
+   "file": "hull_kestrel_hd.png",
+   "width": 2745,
+   "height": 1439,
+   "at": "2026-10-07",
+   "source": "the A+B1 look (art-approved/13): Gemini painted the kestrel on its floor plan (tools/ship_plan.py plan), full size, loaded on an iPad or a desktop"
+  },
+  {
+   "group": "kit",
+   "id": "hull_kestrel_rooms",
+   "index": "hull_kestrel.json",
+   "at": "2026-10-07",
+   "source": "the kestrel's rooms, walk areas, stations, doors and airlocks, computed from its floor plan (tools/ship_plan.py json)"
+  },
+  {
+   "group": "ships",
    "id": "hull_raider",
    "file": "hull_raider.png",
-   "width": 1253,
-   "height": 516,
-   "at": "2026-10-04",
-   "source": "art-approved/08b-enemy-raider-small-empty.png (Michael's yes 2026-10-04), cut by tools/ship_kit.py painted raider: the small sector-1 pirate raider, shown as painted (bow left, as an enemy faces you), half size (one tile = 53.5 px, the Kestrel's)"
+   "width": 902,
+   "height": 556,
+   "at": "2026-10-07",
+   "source": "the A+B1 look (art-approved/13): Gemini painted the raider on its floor plan (tools/ship_plan.py plan), half size"
   },
   {
    "group": "ships",
    "id": "hull_raider_hd",
    "file": "hull_raider_hd.png",
-   "width": 2506,
-   "height": 1032,
-   "at": "2026-10-04",
-   "source": "the same raider at the painting's full size, same crop (tools/ship_kit.py painted-hd raider); loaded only on an iPad or a desktop"
+   "width": 1804,
+   "height": 1113,
+   "at": "2026-10-07",
+   "source": "the A+B1 look (art-approved/13): Gemini painted the raider on its floor plan (tools/ship_plan.py plan), full size, loaded on an iPad or a desktop"
   },
   {
    "group": "kit",
    "id": "hull_raider_rooms",
    "index": "hull_raider.json",
-   "at": "2026-10-04",
-   "source": "the raider's traced rooms, walk areas, machine glows, crew stations and its six painted doors (tools/ship_kit.py RAIDER)"
+   "at": "2026-10-07",
+   "source": "the raider's rooms, walk areas, stations, doors and airlocks, computed from its floor plan (tools/ship_plan.py json)"
+  },
+  {
+   "group": "ships",
+   "id": "hull_gunship",
+   "file": "hull_gunship.png",
+   "width": 1257,
+   "height": 576,
+   "at": "2026-10-07",
+   "source": "the A+B1 look (art-approved/13): Gemini painted the gunship on its floor plan (tools/ship_plan.py plan), half size"
+  },
+  {
+   "group": "ships",
+   "id": "hull_gunship_hd",
+   "file": "hull_gunship_hd.png",
+   "width": 2514,
+   "height": 1151,
+   "at": "2026-10-07",
+   "source": "the A+B1 look (art-approved/13): Gemini painted the gunship on its floor plan (tools/ship_plan.py plan), full size, loaded on an iPad or a desktop"
+  },
+  {
+   "group": "kit",
+   "id": "hull_gunship_rooms",
+   "index": "hull_gunship.json",
+   "at": "2026-10-07",
+   "source": "the gunship's rooms, walk areas, stations, doors and airlocks, computed from its floor plan (tools/ship_plan.py json)"
+  },
+  {
+   "group": "ships",
+   "id": "hull_skiff",
+   "file": "hull_skiff.png",
+   "width": 1046,
+   "height": 556,
+   "at": "2026-10-07",
+   "source": "the A+B1 look (art-approved/13): Gemini painted the skiff on its floor plan (tools/ship_plan.py plan), half size"
+  },
+  {
+   "group": "ships",
+   "id": "hull_skiff_hd",
+   "file": "hull_skiff_hd.png",
+   "width": 2092,
+   "height": 1113,
+   "at": "2026-10-07",
+   "source": "the A+B1 look (art-approved/13): Gemini painted the skiff on its floor plan (tools/ship_plan.py plan), full size, loaded on an iPad or a desktop"
+  },
+  {
+   "group": "kit",
+   "id": "hull_skiff_rooms",
+   "index": "hull_skiff.json",
+   "at": "2026-10-07",
+   "source": "the skiff's rooms, walk areas, stations, doors and airlocks, computed from its floor plan (tools/ship_plan.py json)"
+  },
+  {
+   "group": "ships",
+   "id": "hull_carrier",
+   "file": "hull_carrier.png",
+   "width": 1209,
+   "height": 672,
+   "at": "2026-10-07",
+   "source": "the A+B1 look (art-approved/13): Gemini painted the carrier on its floor plan (tools/ship_plan.py plan), half size"
+  },
+  {
+   "group": "ships",
+   "id": "hull_carrier_hd",
+   "file": "hull_carrier_hd.png",
+   "width": 2418,
+   "height": 1343,
+   "at": "2026-10-07",
+   "source": "the A+B1 look (art-approved/13): Gemini painted the carrier on its floor plan (tools/ship_plan.py plan), full size, loaded on an iPad or a desktop"
+  },
+  {
+   "group": "kit",
+   "id": "hull_carrier_rooms",
+   "index": "hull_carrier.json",
+   "at": "2026-10-07",
+   "source": "the carrier's rooms, walk areas, stations, doors and airlocks, computed from its floor plan (tools/ship_plan.py json)"
+  },
+  {
+   "group": "ships",
+   "id": "hull_dread",
+   "file": "hull_dread.png",
+   "width": 1257,
+   "height": 672,
+   "at": "2026-10-07",
+   "source": "the A+B1 look (art-approved/13): Gemini painted the dread on its floor plan (tools/ship_plan.py plan), half size"
+  },
+  {
+   "group": "ships",
+   "id": "hull_dread_hd",
+   "file": "hull_dread_hd.png",
+   "width": 2514,
+   "height": 1343,
+   "at": "2026-10-07",
+   "source": "the A+B1 look (art-approved/13): Gemini painted the dread on its floor plan (tools/ship_plan.py plan), full size, loaded on an iPad or a desktop"
+  },
+  {
+   "group": "kit",
+   "id": "hull_dread_rooms",
+   "index": "hull_dread.json",
+   "at": "2026-10-07",
+   "source": "the dread's rooms, walk areas, stations, doors and airlocks, computed from its floor plan (tools/ship_plan.py json)"
+  },
+  {
+   "group": "ships",
+   "id": "hull_wasp",
+   "file": "hull_wasp.png",
+   "width": 1094,
+   "height": 480,
+   "at": "2026-10-07",
+   "source": "the A+B1 look (art-approved/13): Gemini painted the wasp on its floor plan (tools/ship_plan.py plan), half size"
+  },
+  {
+   "group": "ships",
+   "id": "hull_wasp_hd",
+   "file": "hull_wasp_hd.png",
+   "width": 2188,
+   "height": 959,
+   "at": "2026-10-07",
+   "source": "the A+B1 look (art-approved/13): Gemini painted the wasp on its floor plan (tools/ship_plan.py plan), full size, loaded on an iPad or a desktop"
+  },
+  {
+   "group": "kit",
+   "id": "hull_wasp_rooms",
+   "index": "hull_wasp.json",
+   "at": "2026-10-07",
+   "source": "the wasp's rooms, walk areas, stations, doors and airlocks, computed from its floor plan (tools/ship_plan.py json)"
+  },
+  {
+   "group": "ships",
+   "id": "hull_shade",
+   "file": "hull_shade.png",
+   "width": 1094,
+   "height": 480,
+   "at": "2026-10-07",
+   "source": "the A+B1 look (art-approved/13): Gemini painted the shade on its floor plan (tools/ship_plan.py plan), half size"
+  },
+  {
+   "group": "ships",
+   "id": "hull_shade_hd",
+   "file": "hull_shade_hd.png",
+   "width": 2188,
+   "height": 959,
+   "at": "2026-10-07",
+   "source": "the A+B1 look (art-approved/13): Gemini painted the shade on its floor plan (tools/ship_plan.py plan), full size, loaded on an iPad or a desktop"
+  },
+  {
+   "group": "kit",
+   "id": "hull_shade_rooms",
+   "index": "hull_shade.json",
+   "at": "2026-10-07",
+   "source": "the shade's rooms, walk areas, stations, doors and airlocks, computed from its floor plan (tools/ship_plan.py json)"
   }
  ]
 }
